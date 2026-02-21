@@ -10,9 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const TEST_LOG_DIR = "babykafka_test"
+
 func newTestLog(t *testing.T) *babykafka.Log {
 	// Create a temporary directory for the log files
-	dir, err := os.MkdirTemp("", "babykafka_test")
+	dir, err := os.MkdirTemp("", TEST_LOG_DIR)
 	require.NoError(t, err)
 
 	// Create a new log instance
@@ -45,7 +47,7 @@ func TestAppend_VariousPayloads(t *testing.T) {
 			log := newTestLog(t)
 
 			// Append the message to the log
-			_, err := log.Append(tt.msg)
+			_, _, err := log.Append(tt.msg)
 			require.NoError(t, err)
 		})
 	}
@@ -56,7 +58,7 @@ func TestReadAt_ReturnsOriginalMessage(t *testing.T) {
 
 	// Append a message to the log
 	msg := babykafka.Message{Key: []byte("key1"), Value: []byte("value1")}
-	_, err := log.Append(msg)
+	_, _, err := log.Append(msg)
 	require.NoError(t, err)
 
 	// Read the message back from the log
@@ -76,20 +78,20 @@ func TestReadAt_MultipleMessages(t *testing.T) {
 	}
 
 	for _, msg := range messages {
-		_, err := log.Append(msg)
+		_, _, err := log.Append(msg)
 		require.NoError(t, err)
 	}
 
-	// Read each message back using the correct offset
-	var offset int64
+	// Read each message back using the correct bytePos
+	var bytePos int64
 	for _, msg := range messages {
-		readMsg, err := log.ReadAt(offset)
+		readMsg, err := log.ReadAt(bytePos)
 		require.NoError(t, err)
 		require.Equal(t, msg.Key, readMsg.Key)
 		require.Equal(t, msg.Value, readMsg.Value)
 
 		// Calculate the next offset (current offset + length prefix + message length)
-		offset += readMsg.SerializedLength()
+		bytePos += readMsg.SerializedLength()
 	}
 }
 
@@ -98,7 +100,7 @@ func TestReadAt_InvalidOffset(t *testing.T) {
 
 	// Append a message to the log
 	msg := babykafka.Message{Key: []byte("key1"), Value: []byte("value1")}
-	_, err := log.Append(msg)
+	_, _, err := log.Append(msg)
 	require.NoError(t, err)
 
 	// Attempt to read from an invalid offset

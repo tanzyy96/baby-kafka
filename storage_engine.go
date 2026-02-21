@@ -28,93 +28,69 @@ type StorageEngine interface {
 }
 
 /*
-Partition is a logical grouping of messages. It should support functions like:
-- Append messages
-- Read messages by offset
-*/
-type Partition struct {
-	currentLog Log
-	nextOffset int64
-}
-
-func NewPartition(folderPath string) (*Partition, error) {
-	logPath := fmt.Sprintf("%s/log-0", folderPath)
-	log, err := NewLog(logPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create partition: %w", err)
-	}
-
-	return &Partition{
-		currentLog: *log,
-		nextOffset: 0,
-	}, nil
-}
-
-func (p *Partition) Append(msg Message) (offset int64, err error) {
-	// TODO: rollover to a new log if the current log exceeds max size
-	// TODO: maintain an index for faster reads
-	// TODO: update nextOffset after appending the message
-	return p.currentLog.Append(msg)
-}
-
-func (p *Partition) ReadAt(offset int64) (*Message, error) {
-	return p.currentLog.ReadAt(offset)
-}
-
-/*
 Log is a single log file that stores messages. Multiple logs will build up to a partition, as they have a maxSize.
 When a log is full, it will perform a rollover.
 */
 type Log struct {
-	file *os.File
-	// index *os.File
-	size int64
+	file       *os.File
+	index      *LogIndex
+	size       int64
+	nextOffset int64 // counter for number of appended messages, we use this to jump via index
 }
 
-func NewLog(filePath string) (*Log, error) {
+func NewLog(filePrefix string) (*Log, error) {
+	filePath := fmt.Sprintf("%s.log", filePrefix)
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create log file: %w", err)
 	}
+	index, err := NewLogIndex(filePrefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create log index: %w", err)
+	}
 
 	return &Log{
-		file: file,
-		size: 0,
+		file:       file,
+		index:      index,
+		size:       0,
+		nextOffset: 0,
 	}, nil
 }
 
 // Returns new file offset
-func (l *Log) Append(msg Message) (offset int64, err error) {
+func (l *Log) Append(msg Message) (offset int64, bytePos int64, err error) {
 	// Serialize the message and write to the log file
 	// Update the size of the log
 	serialized, err := msg.Serialize()
 	if err != nil {
-		return 0, fmt.Errorf("failed to append message: %w", err)
+		return 0, 0, fmt.Errorf("failed to append message: %w", err)
 	}
 
 	// Write length prefix, then payload
 	// BigEndian is just a byte-order convention, it doesn't affect the actual data being stored, but it ensures consistency when reading the log later.
 	prefix := int64(len(serialized))
 	if err := binary.Write(l.file, binary.BigEndian, prefix); err != nil {
-		return 0, fmt.Errorf("failed to write message length prefix: %w", err)
+		return 0, 0, fmt.Errorf("failed to write message length prefix: %w", err)
 	}
 
 	n, err := l.file.Write(serialized)
 	if err != nil {
-		return 0, fmt.Errorf("failed to write message to log: %w", err)
+		return 0, 0, fmt.Errorf("failed to write message to log: %w", err)
 	}
 
 	l.size += int64(n) + 8 // 8 bytes for the length prefix -> 8 * 8 = 64
+	offset = l.nextOffset
+	l.nextOffset++
 
-	return l.size, nil
+	return offset, l.size, nil
 }
 
 /*
 ReadAt reads a message from the log file based on the offset. It should read the length prefix first, then read the message payload.
 */
-func (l *Log) ReadAt(offset int64) (*Message, error) {
+func (l *Log) ReadAt(bytePos int64) (*Message, error) {
 	// Seek to the offset, read the length prefix, then read the message payload
-	if _, err := l.file.Seek(offset, 0); err != nil {
+	if _, err := l.file.Seek(bytePos, 0); err != nil {
 		return nil, fmt.Errorf("failed to seek to offset: %w", err)
 	}
 	var prefix int64
@@ -122,7 +98,7 @@ func (l *Log) ReadAt(offset int64) (*Message, error) {
 		return nil, fmt.Errorf("failed to read message length prefix: %w", err)
 	}
 	payload := make([]byte, prefix)
-	if _, err := l.file.ReadAt(payload, offset+8); err != nil {
+	if _, err := l.file.ReadAt(payload, bytePos+8); err != nil {
 		return nil, fmt.Errorf("failed to read message payload: %w", err)
 	}
 
