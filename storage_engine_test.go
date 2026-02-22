@@ -2,7 +2,6 @@ package babykafka_test
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	babykafka "baby-kafka"
@@ -10,16 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const TEST_LOG_DIR = "babykafka_test"
+const testLogDir = "babykafka_test"
 
 func newTestLog(t *testing.T) *babykafka.Log {
 	// Create a temporary directory for the log files
-	dir, err := os.MkdirTemp("", TEST_LOG_DIR)
+	dir, err := os.MkdirTemp("", testLogDir)
 	require.NoError(t, err)
 
 	// Create a new log instance
-	logPath := filepath.Join(dir, "log-0")
-	log, err := babykafka.NewLog(logPath)
+	log, err := babykafka.NewLog(0, dir)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {

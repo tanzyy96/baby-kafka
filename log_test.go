@@ -10,9 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testIndexLogDir = "babykafka_log_index_test"
+
 func newTestIndex(t *testing.T) *babykafka.LogIndex {
 	// Create a temporary directory for the log files
-	dir, err := os.MkdirTemp("", TEST_LOG_DIR)
+	dir, err := os.MkdirTemp("", testIndexLogDir)
 	require.NoError(t, err)
 
 	// Create a new log instance

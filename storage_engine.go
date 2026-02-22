@@ -12,6 +12,8 @@ import (
 
 var ErrNotImplemented = errors.New("not implemented")
 
+const lognameLength = 20
+
 /*
 StorageEngine is the interface around the storing of message. It should support functions like:
 - Append messages
@@ -35,10 +37,18 @@ type Log struct {
 	file       *os.File
 	index      *LogIndex
 	size       int64
+	baseOffset int64
 	nextOffset int64 // counter for number of appended messages, we use this to jump via index
 }
 
-func NewLog(filePrefix string) (*Log, error) {
+// We use baseOffset to write the log name as 00...00.log
+func NewLog(baseOffset int64, pathPrefix string) (*Log, error) {
+	if pathPrefix == "" {
+		pathPrefix = "./"
+	}
+	padded := fmt.Sprintf("%020d", baseOffset)
+
+	filePrefix := pathPrefix + "/" + padded
 	filePath := fmt.Sprintf("%s.log", filePrefix)
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
 	if err != nil {
@@ -53,6 +63,7 @@ func NewLog(filePrefix string) (*Log, error) {
 		file:       file,
 		index:      index,
 		size:       0,
+		baseOffset: baseOffset,
 		nextOffset: 0,
 	}, nil
 }
@@ -78,11 +89,29 @@ func (l *Log) Append(msg Message) (offset int64, bytePos int64, err error) {
 		return 0, 0, fmt.Errorf("failed to write message to log: %w", err)
 	}
 
+	currSize := l.size
+	currOffset := l.nextOffset
 	l.size += int64(n) + 8 // 8 bytes for the length prefix -> 8 * 8 = 64
-	offset = l.nextOffset
 	l.nextOffset++
 
-	return offset, l.size, nil
+	// Write to index
+	if err := l.index.Append(int32(currOffset), int32(currSize)); err != nil {
+		return 0, 0, fmt.Errorf("failed to write to index: %w", err)
+	}
+
+	return currOffset, l.size, nil
+}
+
+// Reads a message from the log based on absolute offset. This is performed via the log index.
+// so Read(1003) would translate to Read(3) on the log with baseOffset 1000
+func (l *Log) Read(absoluteOffset int64) (*Message, error) {
+	relativeOffset := absoluteOffset - l.baseOffset
+	// We read the byte position from the index, then read the message from the log file at that byte position
+	bytePos, err := l.index.Read(int32(relativeOffset))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read from index: %w", err)
+	}
+	return l.ReadAt(int64(bytePos))
 }
 
 /*
