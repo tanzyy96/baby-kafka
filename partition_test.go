@@ -102,3 +102,52 @@ func TestPartitionReadAtWithRollover(t *testing.T) {
 		require.Equal(t, msg.Value, readMsg.Value)
 	}
 }
+
+func TestLoadPartition(t *testing.T) {
+	// Set a small max size to trigger rollover on every message
+	partition := newTestPartition(t, 1)
+
+	messages := []babykafka.Message{
+		{Key: []byte("key1"), Value: []byte("value1")},
+		{Key: []byte("key2"), Value: []byte("value2")},
+	}
+
+	for _, msg := range messages {
+		_, err := partition.Append(msg)
+		require.NoError(t, err)
+	}
+
+	require.FileExists(t, partition.Path+"/00000000000000000000.log")
+	require.FileExists(t, partition.Path+"/00000000000000000000.index")
+	require.FileExists(t, partition.Path+"/00000000000000000001.log")
+	require.FileExists(t, partition.Path+"/00000000000000000001.index")
+
+	for i, msg := range messages {
+		readMsg, err := partition.ReadAt(int64(i))
+		require.NoError(t, err)
+		require.Equal(t, msg.Key, readMsg.Key)
+		require.Equal(t, msg.Value, readMsg.Value)
+	}
+
+	// Now we load the partition again and verify we can read the messages
+	folderPath := partition.Path[:len(partition.Path)-len("/partition-0")]
+	loadedPartition, err := babykafka.LoadPartition(0, folderPath, 1)
+	require.NoError(t, err)
+
+	// Writing and reading new messages as well
+	newMessages := []babykafka.Message{
+		{Key: []byte("key3"), Value: []byte("value3")},
+	}
+
+	messages = append(messages, newMessages...)
+
+	_, err = loadedPartition.Append(newMessages[0])
+	require.NoError(t, err)
+
+	for i, msg := range messages {
+		readMsg, err := loadedPartition.ReadAt(int64(i))
+		require.NoError(t, err)
+		require.Equal(t, msg.Key, readMsg.Key)
+		require.Equal(t, msg.Value, readMsg.Value)
+	}
+}

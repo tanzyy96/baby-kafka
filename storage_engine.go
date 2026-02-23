@@ -7,7 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 	"time"
+
+	"baby-kafka/internal/utils"
 )
 
 var ErrNotImplemented = errors.New("not implemented")
@@ -65,6 +69,35 @@ func NewLog(baseOffset int64, pathPrefix string) (*Log, error) {
 		size:       0,
 		baseOffset: baseOffset,
 		nextOffset: 0,
+	}, nil
+}
+
+func LoadLog(path string) (*Log, error) {
+	if err := validateLogPath(path); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load log at %s: %w", path, err)
+	}
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file info for log at %s: %w", path, err)
+	}
+	size := stat.Size()
+
+	indexPath := indexPath(path)
+	index, err := LoadLogIndex(indexPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load log index at %s: %w", indexPath, err)
+	}
+
+	return &Log{
+		file:       file,
+		index:      index,
+		size:       size,
+		baseOffset: utils.BaseOffsetFromFilename(path),
+		nextOffset: index.Count(),
 	}, nil
 }
 
@@ -180,4 +213,20 @@ func (m *Message) SerializedLength() int64 {
 		return 0
 	}
 	return int64(len(serialized) + 8) // 8 bytes for the length prefix
+}
+
+func indexPath(logPath string) string {
+	return utils.ChangeExt(logPath, ".index")
+}
+
+// Log path should be {20 digits}.log, e.g. 00000000000000000000.log
+func validateLogPath(filePath string) error {
+	// filename must be 20 digit followed by .index
+	parts := strings.Split(filePath, "/")
+	filename := parts[len(parts)-1]
+	r := regexp.MustCompile(`\d{20}.log`)
+	if valid := r.MatchString(filename); !valid {
+		return fmt.Errorf("invalid log file name")
+	}
+	return nil
 }

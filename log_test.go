@@ -50,3 +50,7 @@ func TestAppendAndRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int32(82), bytePos)
 }
+
+// func TestLoadIndex(t *testing.T) {
+// 	require.NoError(t, fmt.Errorf("not implemented"))
+// }
