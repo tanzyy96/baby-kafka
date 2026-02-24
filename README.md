@@ -15,7 +15,7 @@ Just me trying to learn about Kafka by implementing simple version of its core c
 ## Basic Features
 - [x] Append-only log
 - [x] Log indexing
-- [ ] Supporting partition restarts
+- [x] Supporting partition restarts
 - [ ] Send messages to a topic
 - [ ] Consume messages from a topic
 - [ ] Durability — data survives broker restarts
@@ -31,7 +31,7 @@ Just me trying to learn about Kafka by implementing simple version of its core c
 - [x] Wire `Segment` + `Index` together — `Append` writes to both, `Read` consults index first
 - [x] Segment naming convention (`%020d.log`, `%020d.index`)
 - [x] Tests for append/read round-trip
-- [ ] Tests for durability (close and reopen)
+- [x] Tests for durability (close and reopen)
 
 ### Phase 2: The Partition
 - [x] `Partition` struct owns ordered slice of segments + pointer to active segment
@@ -39,10 +39,10 @@ Just me trying to learn about Kafka by implementing simple version of its core c
 - [x] `Partition.Read` — find correct segment by base offset, then read
 - [ ] `findSegment(offset)` — binary search segments by base offset
 - [x] Segment rolling — open new segment when active exceeds `maxBytes`
-- [ ] Partition recovery on startup — reconstruct segments from directory filenames
+- [x] Partition recovery on startup — reconstruct segments from directory filenames
 - [ ] Concurrent read safety with `sync.RWMutex`
-- [ ] Tests for reads spanning multiple segments
-- [ ] Tests for recovery after restart
+- [x] Tests for reads spanning multiple segments
+- [x] Tests for recovery after restart
 
 ### Phase 3: The Broker
 - [ ] `Topic` struct owns map of partitions

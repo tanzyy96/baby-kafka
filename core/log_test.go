@@ -1,25 +1,25 @@
-package babykafka_test
+package core_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	babykafka "baby-kafka"
+	core "baby-kafka/core"
 
 	"github.com/stretchr/testify/require"
 )
 
 const testIndexLogDir = "babykafka_log_index_test"
 
-func newTestIndex(t *testing.T) *babykafka.LogIndex {
+func newTestIndex(t *testing.T) *core.LogIndex {
 	// Create a temporary directory for the log files
 	dir, err := os.MkdirTemp("", testIndexLogDir)
 	require.NoError(t, err)
 
 	// Create a new log instance
 	logPath := filepath.Join(dir, "log-0")
-	index, err := babykafka.NewLogIndex(logPath)
+	index, err := core.NewLogIndex(logPath)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {

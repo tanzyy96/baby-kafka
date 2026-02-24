@@ -1,23 +1,23 @@
-package babykafka_test
+package core_test
 
 import (
 	"os"
 	"testing"
 
-	babykafka "baby-kafka"
+	"baby-kafka/core"
 
 	"github.com/stretchr/testify/require"
 )
 
 const testPartitionDir = "babykafka_partition_test"
 
-func newTestPartition(t *testing.T, maxSize int64) *babykafka.Partition {
+func newTestPartition(t *testing.T, maxSize int64) *core.Partition {
 	// Create a temporary directory for the partition
 	dir, err := os.MkdirTemp("", testPartitionDir)
 	require.NoError(t, err)
 
 	// Create a new partition instance
-	partition, err := babykafka.NewPartition(0, dir, maxSize) // Set maxSize to 1 byte to trigger rollover quickly, else 0 to use default
+	partition, err := core.NewPartition(0, dir, maxSize) // Set maxSize to 1 byte to trigger rollover quickly, else 0 to use default
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -38,7 +38,7 @@ func TestNewPartition(t *testing.T) {
 func TestPartitionAppendAndReadAt(t *testing.T) {
 	partition := newTestPartition(t, 0)
 
-	messages := []babykafka.Message{
+	messages := []core.Message{
 		{Key: []byte("key1"), Value: []byte("value1")},
 		{Key: []byte("key2"), Value: []byte("value2")},
 	}
@@ -63,7 +63,7 @@ func TestPartitionAppend_Rollover(t *testing.T) {
 
 	// Append messages until we trigger a rollover
 	for i := 0; i < 5; i++ {
-		msg := babykafka.Message{Key: []byte("key"), Value: []byte("value")}
+		msg := core.Message{Key: []byte("key"), Value: []byte("value")}
 		_, err := partition.Append(msg)
 		require.NoError(t, err)
 	}
@@ -80,7 +80,7 @@ func TestPartitionReadAtWithRollover(t *testing.T) {
 	// Set a small max size to trigger rollover on every message
 	partition := newTestPartition(t, 1)
 
-	messages := []babykafka.Message{
+	messages := []core.Message{
 		{Key: []byte("key1"), Value: []byte("value1")},
 		{Key: []byte("key2"), Value: []byte("value2")},
 	}
@@ -107,7 +107,7 @@ func TestLoadPartition(t *testing.T) {
 	// Set a small max size to trigger rollover on every message
 	partition := newTestPartition(t, 1)
 
-	messages := []babykafka.Message{
+	messages := []core.Message{
 		{Key: []byte("key1"), Value: []byte("value1")},
 		{Key: []byte("key2"), Value: []byte("value2")},
 	}
@@ -131,11 +131,11 @@ func TestLoadPartition(t *testing.T) {
 
 	// Now we load the partition again and verify we can read the messages
 	folderPath := partition.Path[:len(partition.Path)-len("/partition-0")]
-	loadedPartition, err := babykafka.LoadPartition(0, folderPath, 1)
+	loadedPartition, err := core.LoadPartition(0, folderPath, 1)
 	require.NoError(t, err)
 
 	// Writing and reading new messages as well
-	newMessages := []babykafka.Message{
+	newMessages := []core.Message{
 		{Key: []byte("key3"), Value: []byte("value3")},
 	}
 

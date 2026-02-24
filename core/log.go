@@ -1,4 +1,4 @@
-package babykafka
+package core
 
 import (
 	"encoding/binary"

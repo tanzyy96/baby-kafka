@@ -1,23 +1,23 @@
-package babykafka_test
+package core_test
 
 import (
 	"os"
 	"testing"
 
-	babykafka "baby-kafka"
+	"baby-kafka/core"
 
 	"github.com/stretchr/testify/require"
 )
 
 const testLogDir = "babykafka_test"
 
-func newTestLog(t *testing.T) *babykafka.Log {
+func newTestLog(t *testing.T) *core.Log {
 	// Create a temporary directory for the log files
 	dir, err := os.MkdirTemp("", testLogDir)
 	require.NoError(t, err)
 
 	// Create a new log instance
-	log, err := babykafka.NewLog(0, dir)
+	log, err := core.NewLog(0, dir)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -30,14 +30,14 @@ func newTestLog(t *testing.T) *babykafka.Log {
 func TestAppend_VariousPayloads(t *testing.T) {
 	tests := []struct {
 		name string
-		msg  babykafka.Message
+		msg  core.Message
 	}{
-		{"simple message", babykafka.Message{Key: []byte("key1"), Value: []byte("value1")}},
-		{"empty key", babykafka.Message{Key: []byte{}, Value: []byte("value1")}},
-		{"empty value", babykafka.Message{Key: []byte("key1"), Value: []byte{}}},
-		{"both empty", babykafka.Message{Key: []byte{}, Value: []byte{}}},
-		{"large value", babykafka.Message{Key: []byte("key1"), Value: make([]byte, 1024*1024)}}, // 1MB value
-		{"binary data", babykafka.Message{Key: []byte{0x00, 0xFF, 0xAA}, Value: []byte{0x01, 0x02, 0x03}}},
+		{"simple message", core.Message{Key: []byte("key1"), Value: []byte("value1")}},
+		{"empty key", core.Message{Key: []byte{}, Value: []byte("value1")}},
+		{"empty value", core.Message{Key: []byte("key1"), Value: []byte{}}},
+		{"both empty", core.Message{Key: []byte{}, Value: []byte{}}},
+		{"large value", core.Message{Key: []byte("key1"), Value: make([]byte, 1024*1024)}}, // 1MB value
+		{"binary data", core.Message{Key: []byte{0x00, 0xFF, 0xAA}, Value: []byte{0x01, 0x02, 0x03}}},
 	}
 
 	for _, tt := range tests {
@@ -55,7 +55,7 @@ func TestReadAt_ReturnsOriginalMessage(t *testing.T) {
 	log := newTestLog(t)
 
 	// Append a message to the log
-	msg := babykafka.Message{Key: []byte("key1"), Value: []byte("value1")}
+	msg := core.Message{Key: []byte("key1"), Value: []byte("value1")}
 	_, _, err := log.Append(msg)
 	require.NoError(t, err)
 
@@ -69,7 +69,7 @@ func TestReadAt_ReturnsOriginalMessage(t *testing.T) {
 func TestReadAt_MultipleMessages(t *testing.T) {
 	// append multiple messages and read them back to ensure offsets are correct
 	log := newTestLog(t)
-	messages := []babykafka.Message{
+	messages := []core.Message{
 		{Key: []byte("key1"), Value: []byte("value1")},
 		{Key: []byte("key2"), Value: []byte("value2")},
 		{Key: []byte("key3"), Value: []byte("value3")},
@@ -97,7 +97,7 @@ func TestReadAt_InvalidOffset(t *testing.T) {
 	log := newTestLog(t)
 
 	// Append a message to the log
-	msg := babykafka.Message{Key: []byte("key1"), Value: []byte("value1")}
+	msg := core.Message{Key: []byte("key1"), Value: []byte("value1")}
 	_, _, err := log.Append(msg)
 	require.NoError(t, err)
 
