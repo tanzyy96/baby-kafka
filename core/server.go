@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"baby-kafka/core/proto"
+
+	"github.com/charmbracelet/log"
 )
 
 /*
@@ -32,12 +34,13 @@ type Server struct {
 
 type Request struct{}
 
-func NewServer(port string, rolloverLimit int64, datadir string) (*Server, error) {
-	n, err := net.Listen("tcp", ":"+string(port))
+// func NewServer(port string, rolloverLimit int64, datadir string) (*Server, error) {
+func NewServer(cfg *Config) (*Server, error) {
+	n, err := net.Listen("tcp", string(cfg.ServerPort))
 	if err != nil {
 		return nil, fmt.Errorf("failed to start network listener: %w", err)
 	}
-	b, err := NewBroker(datadir, rolloverLimit)
+	b, err := NewBroker(cfg.BasePath, cfg.RolloverLimit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create broker: %w", err)
 	}
@@ -48,7 +51,7 @@ func NewServer(port string, rolloverLimit int64, datadir string) (*Server, error
 }
 
 func (s *Server) Start(ctx context.Context) error {
-	fmt.Println("Network manager started, listening for connections...")
+	log.Info("Network manager started, listening for connections...")
 
 	wg := sync.WaitGroup{}
 
@@ -63,7 +66,7 @@ func (s *Server) Start(ctx context.Context) error {
 		if err != nil {
 			select {
 			case <-ctx.Done():
-				fmt.Println("Received shutdown signal, closing listener...")
+				log.Warn("Received shutdown signal, closing listener...")
 				wg.Wait() // wait for connections to close
 				return nil
 			default:
@@ -94,9 +97,9 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		msgType, payload, err := proto.ReadFrame(conn)
 		if err != nil {
 			if err == io.EOF {
-				fmt.Println("Client disconnected")
+				log.Info("Client disconnected")
 			} else {
-				fmt.Printf("Failed to read message frame: %v\n", err)
+				log.Warnf("Failed to read message frame: %v\n", err)
 			}
 			return
 

@@ -49,9 +49,9 @@ Just me trying to learn about Kafka by implementing simple version of its core c
 - [x] `Broker` struct owns map of topics
 - [x] Create topic API — specify partition count
 - [x] Partition assignment — `hash(key) % numPartitions` for keyed, round-robin for unkeyed
-- [x] Integration test — produce 1000 messages, read them all back across partitions
+- [ ] Integration test — produce 1000 messages, read them all back across partitions
 
-- [ ] Introduce `Config` struct to manage broker configs
+- [x] Introduce `Config` struct to manage broker configs
 
 ### Phase 4: TCP Server + Wire Protocol
 - [x] TCP server that accepts connections
