@@ -2,116 +2,169 @@ package core
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
+
+	"baby-kafka/internal/utils"
 )
 
+var ErrNotImplemented = errors.New("not implemented")
+
+const lognameLength = 20
+
 /*
-How do indexes in Kafka work?
-Each entry is just 2 numbers:
-┌─────────────────┬──────────────────┐
-│ relative offset │ byte position    │
-│    (4 bytes)    │    (4 bytes)     │
-└─────────────────┴──────────────────┘
-
-	8 bytes total per entry
-
-So example would be [0,0], [1,37], [2,82]
-Real Kafka uses a sparse index that only stores every Nth offset, but for simplicity we can store every offset in our implementation. This allows us to quickly find the byte position of a message given its offset, which is crucial for efficient reads.
+Log is a single log file that stores messages. Multiple logs will build up to a partition, as they have a maxSize.
+When a log is full, it will perform a rollover.
 */
-
-const entryWidth = 8
-
-type LogIndex struct {
-	file *os.File
-	size int64
+type Log struct {
+	file       *os.File
+	index      *LogIndex
+	size       int64
+	baseOffset int64
+	nextOffset int64 // counter for number of appended messages, we use this to jump via index
 }
 
-func NewLogIndex(filePrefix string) (*LogIndex, error) {
-	indexPath := fmt.Sprintf("%s.index", filePrefix)
-	index, err := os.OpenFile(indexPath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create index file: %w", err)
+// We use baseOffset to write the log name as 00...00.log
+func NewLog(baseOffset int64, pathPrefix string) (*Log, error) {
+	if pathPrefix == "" {
+		pathPrefix = "./"
 	}
-	return &LogIndex{
-		file: index,
-		size: 0,
+	padded := fmt.Sprintf("%020d", baseOffset)
+
+	filePrefix := pathPrefix + "/" + padded
+	filePath := fmt.Sprintf("%s.log", filePrefix)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create log file: %w", err)
+	}
+	index, err := NewLogIndex(filePrefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create log index: %w", err)
+	}
+
+	return &Log{
+		file:       file,
+		index:      index,
+		size:       0,
+		baseOffset: baseOffset,
+		nextOffset: 0,
 	}, nil
 }
 
-func LoadLogIndex(filepath string) (*LogIndex, error) {
-	if err := validateIndexPath(filepath); err != nil {
+func LoadLog(path string) (*Log, error) {
+	if err := validateLogPath(path); err != nil {
 		return nil, err
 	}
-	index, err := os.OpenFile(filepath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open index file: %w", err)
+		return nil, fmt.Errorf("failed to load log at %s: %w", path, err)
 	}
-	stat, err := index.Stat()
+	stat, err := file.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file info: %w", err)
+		return nil, fmt.Errorf("failed to get file info for log at %s: %w", path, err)
 	}
-	return &LogIndex{
-		file: index,
-		size: stat.Size(),
+	size := stat.Size()
+
+	indexPath := indexPath(path)
+	index, err := LoadLogIndex(indexPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load log index at %s: %w", indexPath, err)
+	}
+
+	return &Log{
+		file:       file,
+		index:      index,
+		size:       size,
+		baseOffset: utils.BaseOffsetFromFilename(path),
+		nextOffset: index.Count(),
 	}, nil
 }
 
-func (i *LogIndex) Append(offset int32, bytePos int32) error {
-	// 4 bytes for offset, 4 bytes for byte position
-	if err := binary.Write(i.file, binary.BigEndian, offset); err != nil {
-		return fmt.Errorf("failed to write offset to index: %w", err)
+// Returns new file offset
+func (l *Log) Append(msg Message) (offset int64, bytePos int64, err error) {
+	// Serialize the message and write to the log file
+	// Update the size of the log
+	serialized, err := msg.Serialize()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to append message: %w", err)
 	}
 
-	if err := binary.Write(i.file, binary.BigEndian, bytePos); err != nil {
-		return fmt.Errorf("failed to write byte position to index: %w", err)
+	// Write length prefix, then payload
+	// BigEndian is just a byte-order convention, it doesn't affect the actual data being stored, but it ensures consistency when reading the log later.
+	prefix := int64(len(serialized))
+	if err := binary.Write(l.file, binary.BigEndian, prefix); err != nil {
+		return 0, 0, fmt.Errorf("failed to write message length prefix: %w", err)
 	}
 
-	i.size += 8
+	n, err := l.file.Write(serialized)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to write message to log: %w", err)
+	}
 
-	return nil
+	currSize := l.size
+	currOffset := l.nextOffset
+	l.size += int64(n) + 8 // 8 bytes for the length prefix -> 8 * 8 = 64
+	l.nextOffset++
+
+	// Write to index
+	if err := l.index.Append(int32(currOffset), int32(currSize)); err != nil {
+		return 0, 0, fmt.Errorf("failed to write to index: %w", err)
+	}
+
+	return currOffset, l.size, nil
 }
 
-func (i *LogIndex) Read(offset int32) (bytePos int32, err error) {
-	// Jump by n * 8 bytes
-	indexBytePos := offset * entryWidth
-	if _, err := i.file.Seek(int64(indexBytePos), 0); err != nil {
-		return 0, fmt.Errorf("failed to seek to offset in index: %w", err)
+// Reads a message from the log based on absolute offset. This is performed via the log index.
+// so Read(1003) would translate to Read(3) on the log with baseOffset 1000
+func (l *Log) Read(absoluteOffset int64) (*Message, error) {
+	relativeOffset := absoluteOffset - l.baseOffset
+	// We read the byte position from the index, then read the message from the log file at that byte position
+	bytePos, err := l.index.Read(int32(relativeOffset))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read from index: %w", err)
 	}
-
-	var foundOffset int32
-	if err := binary.Read(i.file, binary.BigEndian, &foundOffset); err != nil {
-		return 0, fmt.Errorf("failed to read foundOffset on index: %w", err)
-	}
-	if foundOffset != offset {
-		return 0, fmt.Errorf("found incorrect offset on index: %d instead of %d", foundOffset, offset)
-	}
-
-	if err := binary.Read(i.file, binary.BigEndian, &bytePos); err != nil {
-		return 0, fmt.Errorf("failed to read bytePos on index: %w", err)
-	}
-
-	return bytePos, nil
+	return l.ReadAt(int64(bytePos))
 }
 
-// Returns the number of entries in the index, which is the size of the index file divided by the width of each entry (8 bytes).
-func (i *LogIndex) Count() int64 {
-	return i.size / entryWidth
+/*
+ReadAt reads a message from the log file based on the offset. It should read the length prefix first, then read the message payload.
+*/
+func (l *Log) ReadAt(bytePos int64) (*Message, error) {
+	// Seek to the offset, read the length prefix, then read the message payload
+	if _, err := l.file.Seek(bytePos, 0); err != nil {
+		return nil, fmt.Errorf("failed to seek to offset: %w", err)
+	}
+	var prefix int64
+	if err := binary.Read(l.file, binary.BigEndian, &prefix); err != nil {
+		return nil, fmt.Errorf("failed to read message length prefix: %w", err)
+	}
+	payload := make([]byte, prefix)
+	if _, err := l.file.ReadAt(payload, bytePos+8); err != nil {
+		return nil, fmt.Errorf("failed to read message payload: %w", err)
+	}
+
+	return DeserializeMessage(payload)
 }
 
-func (i *LogIndex) Close() error {
-	return i.file.Close()
+func (l *Log) Close() error {
+	return l.file.Close()
 }
 
-func validateIndexPath(filePath string) error {
+func indexPath(logPath string) string {
+	return utils.ChangeExt(logPath, ".index")
+}
+
+// Log path should be {20 digits}.log, e.g. 00000000000000000000.log
+func validateLogPath(filePath string) error {
 	// filename must be 20 digit followed by .index
 	parts := strings.Split(filePath, "/")
 	filename := parts[len(parts)-1]
-	r := regexp.MustCompile(`\d{20}.index`)
+	r := regexp.MustCompile(`\d{20}.log`)
 	if valid := r.MatchString(filename); !valid {
-		return fmt.Errorf("invalid index file name")
+		return fmt.Errorf("invalid log file name")
 	}
 	return nil
 }

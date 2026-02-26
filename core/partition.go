@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"os"
+	"sync"
 )
 
 const MAX_SIZE int64 = 1000 // 1kb
@@ -19,15 +20,17 @@ Example of directory:
 	/00000001.index
 */
 type Partition struct {
-	Path string // Partition folder path
+	Path  string // Partition folder path
+	Index int32
 
+	mutex     sync.RWMutex // Locks read operations during writes & rollovers
 	logs      []*Log
 	activeLog *Log
 	maxSize   int64 // cap for rollover
 }
 
 // Should create a new log and then register it to this partition
-func NewPartition(index int64, folderPath string, maxSize int64) (*Partition, error) {
+func NewPartition(index int32, folderPath string, maxSize int64) (*Partition, error) {
 	partitionPath := fmt.Sprintf("%s/partition-%d", folderPath, index)
 	if err := os.MkdirAll(partitionPath, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create partition directory: %w", err)
@@ -44,6 +47,7 @@ func NewPartition(index int64, folderPath string, maxSize int64) (*Partition, er
 
 	return &Partition{
 		Path:      partitionPath,
+		Index:     index,
 		activeLog: log,
 		logs:      []*Log{log},
 		maxSize:   maxSize,
@@ -91,6 +95,9 @@ func LoadPartition(index int64, folderPath string, maxSize int64) (*Partition, e
 }
 
 func (p *Partition) Append(msg Message) (offset int64, err error) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
 	if p.shouldRoll() {
 		if err := p.rollover(); err != nil {
 			return 0, fmt.Errorf("failed to append message: %w", err)
@@ -102,6 +109,9 @@ func (p *Partition) Append(msg Message) (offset int64, err error) {
 }
 
 func (p *Partition) ReadAt(offset int64) (*Message, error) {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
 	// Search the logs array to find the log corresponding to the offset. We can use the baseOffset of each log to determine if the offset falls within that log's range.
 	for _, log := range p.logs {
 		if offset >= log.baseOffset && offset < log.baseOffset+log.nextOffset {

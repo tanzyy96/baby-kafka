@@ -40,16 +40,18 @@ Just me trying to learn about Kafka by implementing simple version of its core c
 - [ ] `findSegment(offset)` — binary search segments by base offset
 - [x] Segment rolling — open new segment when active exceeds `maxBytes`
 - [x] Partition recovery on startup — reconstruct segments from directory filenames
-- [ ] Concurrent read safety with `sync.RWMutex`
+- [x] Concurrent read safety with `sync.RWMutex`
 - [x] Tests for reads spanning multiple segments
 - [x] Tests for recovery after restart
 
 ### Phase 3: The Broker
-- [ ] `Topic` struct owns map of partitions
-- [ ] `Broker` struct owns map of topics
-- [ ] Create topic API — specify partition count
-- [ ] Partition assignment — `hash(key) % numPartitions` for keyed, round-robin for unkeyed
-- [ ] Integration test — produce 1000 messages, read them all back across partitions
+- [x] `Topic` struct owns map of partitions
+- [x] `Broker` struct owns map of topics
+- [x] Create topic API — specify partition count
+- [x] Partition assignment — `hash(key) % numPartitions` for keyed, round-robin for unkeyed
+- [x] Integration test — produce 1000 messages, read them all back across partitions
+
+- [ ] Introduce `Config` struct to manage broker configs
 
 ### Phase 4: TCP Server + Wire Protocol
 - [ ] TCP server that accepts connections
