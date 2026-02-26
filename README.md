@@ -8,7 +8,7 @@ Just me trying to learn about Kafka by implementing simple version of its core c
 	- [x] Partition
 	- [x] Segment
 	- [x] Segment index
-	- [ ] NetworkParser
+	- [x] Network Protocol
 - [ ] Producer
 - [ ] Consumer
 
@@ -54,13 +54,13 @@ Just me trying to learn about Kafka by implementing simple version of its core c
 - [ ] Introduce `Config` struct to manage broker configs
 
 ### Phase 4: TCP Server + Wire Protocol
-- [ ] TCP server that accepts connections
-- [ ] Length-prefixed binary request/response protocol
-- [ ] `Produce` request handler
-- [ ] `Fetch` request handler
-- [ ] `ListTopics` request handler
-- [ ] Concurrent connection handling with goroutines
-- [ ] Graceful shutdown
+- [x] TCP server that accepts connections
+- [x] Length-prefixed binary request/response protocol
+- [x] `Produce` request handler
+- [x] `Fetch` request handler
+- [x] `ListTopics` request handler
+- [x] Concurrent connection handling with goroutines
+- [x] Graceful shutdown
 
 ### Phase 5: Clients
 - [ ] `Producer` client — connect to broker, send messages

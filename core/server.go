@@ -1,9 +1,11 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"baby-kafka/core/proto"
@@ -45,21 +47,48 @@ func NewServer(port string, rolloverLimit int64, datadir string) (*Server, error
 	}, nil
 }
 
-func (s *Server) Start() {
+func (s *Server) Start(ctx context.Context) error {
 	fmt.Println("Network manager started, listening for connections...")
+
+	wg := sync.WaitGroup{}
+
+	// THIS is what unblocks Accept() when ctrl+c is pressed
+	go func() {
+		<-ctx.Done()
+		(*s.listener).Close()
+	}()
+
 	for {
 		conn, err := (*s.listener).Accept()
 		if err != nil {
-			fmt.Printf("Failed to accept connection: %v\n", err)
-			continue
+			select {
+			case <-ctx.Done():
+				fmt.Println("Received shutdown signal, closing listener...")
+				wg.Wait() // wait for connections to close
+				return nil
+			default:
+				return err
+			}
 		}
-		go s.handleConnection(conn)
+
+		wg.Add(1)
+		go func() {
+			// Track active connections and wait for them to finish before shutting down the server
+			defer wg.Done()
+			s.handleConnection(ctx, conn)
+		}()
 	}
 }
 
-func (s *Server) handleConnection(conn net.Conn) {
+func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second)) // Set a read deadline to prevent hanging connections
+
+	// We need this goroutine to ensure that if the server is shutting down while a client is still connected, we can force close the connection to unblock any pending reads/writes. Otherwise, the server might hang indefinitely waiting for client activity.
+	go func() {
+		<-ctx.Done()                 // This blocks here until the server is shutting down
+		conn.SetDeadline(time.Now()) // Force close the connection when the server is shutting down
+	}()
 
 	for {
 		msgType, payload, err := proto.ReadFrame(conn)
