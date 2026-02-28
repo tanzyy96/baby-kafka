@@ -1,5 +1,5 @@
 {
-  "base_path": "data",
+  "base_path": "./data",
   "rollover_limit": 1048576,
   "server_port": ":8080"
 }

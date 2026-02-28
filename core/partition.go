@@ -8,6 +8,8 @@ import (
 
 const MAX_SIZE int64 = 1000 // 1kb
 
+var ErrNoMessagesAtOffset = fmt.Errorf("no messages found at the given offset")
+
 /*
 Partition is the grouping of log segments, and manages the rollover process.
 The purpose of partitions is to promote concurrency, so we can default to single partition first.
@@ -115,11 +117,11 @@ func (p *Partition) ReadAt(offset int64) (*Message, error) {
 	// Search the logs array to find the log corresponding to the offset. We can use the baseOffset of each log to determine if the offset falls within that log's range.
 	for _, log := range p.logs {
 		if offset >= log.baseOffset && offset < log.baseOffset+log.nextOffset {
-			fmt.Printf("Reading offset %d from log with baseOffset %d\n", offset, log.baseOffset)
 			return log.Read(offset)
 		}
 	}
-	return nil, fmt.Errorf("offset %d not found in any log", offset)
+
+	return nil, ErrNoMessagesAtOffset
 }
 
 // Rollover creates a new log file and sets it as the active log. The old log is added to the logs array.

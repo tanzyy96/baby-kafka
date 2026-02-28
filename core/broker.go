@@ -2,6 +2,9 @@ package core
 
 import (
 	"fmt"
+	"os"
+
+	"github.com/charmbracelet/log"
 )
 
 // We don't really need this, but more for my own reference
@@ -19,11 +22,14 @@ type Broker struct {
 	topics        map[string]*Topic
 	basePath      string
 	rolloverLimit int64
-	// TODO: NetworkManager
 }
 
-// TODO: I feel like this should be some config struct instead
 func NewBroker(basePath string, rolloverLimit int64) (*Broker, error) {
+	// Try creating the base path for the broker if it doesn't exist
+	if err := os.Mkdir(basePath, 0o755); err != nil {
+		log.Infof("Base path already exists, loading existing directory: %s", basePath)
+		// TODO: LoadBroker()
+	}
 	topics := make(map[string]*Topic)
 	return &Broker{
 		topics:        topics,
@@ -43,6 +49,7 @@ func (b *Broker) CreateTopic(key string, numPartitions int32) error {
 	}
 
 	b.topics[key] = topic
+	log.Info("Created topic", "key", key, "numPartitions", numPartitions)
 	return nil
 }
 

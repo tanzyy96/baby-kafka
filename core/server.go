@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +17,7 @@ import (
 /*
 Wire protocol:
 - 4 bytes: length of the message (uint32, big-endian)
+- 1 byte:  status (success, error)
 - 1 byte: message type (produce, consume, create topic, list topics, etc.)
 - N bytes: serialized message (using gob encoding)
 */
@@ -96,7 +98,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	for {
 		msgType, payload, err := proto.ReadFrame(conn)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				log.Info("Client disconnected")
 			} else {
 				log.Warnf("Failed to read message frame: %v\n", err)
@@ -121,7 +123,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		}
 
 		if err != nil {
-			proto.WriteError(conn, err)
+			proto.WriteError(conn, proto.StatusServerError, err)
 			continue
 		}
 		// Response

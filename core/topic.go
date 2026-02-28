@@ -15,10 +15,13 @@ Producers write to topics and consumers read from topics.
 Each topic can have multiple partitions, and each partition is an ordered, immutable sequence of messages that is continually appended to. The messages in the partitions are assigned a sequential id number called the offset that uniquely identifies each message within the partition. The purpose of topics is to allow for parallelism and scalability, as messages can be distributed across multiple partitions and consumed by multiple consumers in parallel.
 */
 type Topic struct {
-	key           string
+	Key string
+
 	folderPath    string
 	partitions    map[int32]*Partition
 	numPartitions int32
+	// TODO: load from disk
+	// configFile    *os.File
 
 	// Counter for round-robin partition assignment
 	// Atomic helps it remain thread-safe when we have multiple producers writing to the same topic
@@ -41,7 +44,7 @@ func NewTopic(key string, numPartition int32, folderPath string, rolloverLimit i
 	}
 
 	return &Topic{
-		key:           key,
+		Key:           key,
 		folderPath:    topicPath,
 		partitions:    partitions,
 		numPartitions: numPartition,

@@ -3,6 +3,7 @@ package proto_test
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/gob"
 	"fmt"
 	"io"
 	"testing"
@@ -12,19 +13,75 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestProtoWriteAndReadFrame(t *testing.T) {
+func TestProtoWriteFrame(t *testing.T) {
 	// OOOH: we can use bytes.Buffer as an in-memory stream to test our proto package's ReadFrame and WriteFrame functions!
 	b := &bytes.Buffer{}
 
 	testData := []byte{1, 2, 3, 4, 5}
 
-	err := proto.WriteFrame(b, testData)
+	resp := proto.Response{
+		Status: proto.StatusBadRequest,
+		Error:  "bad request",
+		Data:   testData,
+	}
+
+	respBuffer := new(bytes.Buffer)
+	err := gob.NewEncoder(respBuffer).Encode(resp)
 	require.NoError(t, err)
 
-	msgType, payload, err := proto.ReadFrame(b)
+	err = proto.WriteFrame(b, respBuffer.Bytes())
 	require.NoError(t, err)
-	require.Equal(t, 1, msgType)            // The first byte of testData is 1
-	require.Equal(t, testData[1:], payload) // The payload should be the rest of testData
+
+	// First 4 bytes: length
+	// N bytes: Encoded Response
+	var length uint32
+	err = binary.Read(b, binary.BigEndian, &length)
+	require.NoError(t, err)
+
+	frame := make([]byte, length)
+	_, err = io.ReadFull(b, frame)
+	require.NoError(t, err)
+
+	var decoded proto.Response
+	r := bytes.NewReader(frame)
+	err = gob.NewDecoder(r).Decode(&decoded)
+	require.NoError(t, err)
+	require.Equal(t, decoded.Status, resp.Status)
+	require.Equal(t, decoded.Error, resp.Error)
+	require.Equal(t, decoded.Data, resp.Data)
+}
+
+func TestProtoReadFrame(t *testing.T) {
+	msgType := 1
+	resp := proto.Response{
+		Status: proto.StatusOK,
+		Error:  "good request",
+		Data:   []byte{1, 2, 3},
+	}
+	respBuffer := &bytes.Buffer{}
+	err := gob.NewEncoder(respBuffer).Encode(&resp)
+	require.NoError(t, err)
+
+	length := uint32(len(respBuffer.Bytes()) + 1)
+
+	b := &bytes.Buffer{}
+
+	// Write length-prefix
+	err = binary.Write(b, binary.BigEndian, length)
+	require.NoError(t, err)
+
+	// Write msg type
+	err = b.WriteByte(byte(msgType))
+	require.NoError(t, err)
+
+	// Write encoded body
+	_, err = b.Write(respBuffer.Bytes())
+	require.NoError(t, err)
+
+	mt, payload, err := proto.ReadFrame(b)
+	require.NoError(t, err)
+	require.Equal(t, mt, msgType)
+	require.Equal(t, payload, respBuffer.Bytes())
 }
 
 func TestProtoWriteError(t *testing.T) {
@@ -32,17 +89,23 @@ func TestProtoWriteError(t *testing.T) {
 	b := &bytes.Buffer{}
 
 	testErr := "This is a test error"
-	err := proto.WriteError(b, fmt.Errorf(testErr))
+	err := proto.WriteError(b, proto.StatusBadRequest, fmt.Errorf(testErr))
 	require.NoError(t, err)
 
-	// We cannot use ReadFrame here because the error message is not in the expected frame format, but we can read the raw bytes and check the content
-	frame := make([]byte, b.Len())
+	// First 4 bytes: length
+	// N bytes: Encoded Response
+	var length uint32
+	err = binary.Read(b, binary.BigEndian, &length)
+	require.NoError(t, err)
+
+	frame := make([]byte, length)
 	_, err = io.ReadFull(b, frame)
 	require.NoError(t, err)
 
-	// We expect first 4 bytes to be length prefix, and the rest to be the error message
-	expectedLength := uint32(len("ERROR:" + testErr))
-	expectedErrorResp := "ERROR:" + testErr
-	require.Equal(t, expectedLength, binary.BigEndian.Uint32(frame[:4]))
-	require.Equal(t, expectedErrorResp, string(frame[4:]))
+	var decoded proto.Response
+	r := bytes.NewReader(frame)
+	err = gob.NewDecoder(r).Decode(&decoded)
+	require.NoError(t, err)
+	require.Equal(t, decoded.Status, proto.StatusBadRequest)
+	require.Equal(t, decoded.Error, testErr)
 }

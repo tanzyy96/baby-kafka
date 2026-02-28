@@ -1,0 +1,71 @@
+package client
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/binary"
+	"encoding/gob"
+	"fmt"
+	"io"
+
+	"baby-kafka/core/proto"
+
+	"github.com/charmbracelet/log"
+)
+
+// Protocol: 4 byte message length + 1 byte message type + N bytes payload
+func writeRequest(w *bufio.Writer, msgType int, payload interface{}) error {
+	b := new(bytes.Buffer)
+	if payload == nil {
+		payload = struct{}{}
+	}
+	if err := gob.NewEncoder(b).Encode(payload); err != nil {
+		return fmt.Errorf("failed to encode produce request: %w", err)
+	}
+
+	length := uint32(1 + len(b.Bytes())) // 1 byte for message type + payload length
+	buffer := new(bytes.Buffer)
+
+	log.Info("Writing request of type", "msgType", msgType, "payload", payload, "type+payloadLength", length)
+
+	if err := binary.Write(buffer, binary.BigEndian, length); err != nil {
+		return fmt.Errorf("failed to write request length: %w", err)
+	}
+	if err := buffer.WriteByte(byte(msgType)); err != nil {
+		return fmt.Errorf("failed to write request message type: %w", err)
+	}
+	if _, err := buffer.Write(b.Bytes()); err != nil {
+		return fmt.Errorf("failed to write request payload: %w", err)
+	}
+
+	_, err := w.Write(buffer.Bytes())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// Protocol: 4 byte message length + N bytes payload (gob-encoded response struct for success, or "ERROR:<error message>" for error)
+// If this function returns error, that means the client request has issues. Server-sided error should be reflected in the resp
+func readResponse(r io.Reader, resp *proto.Response) error {
+	// Read length of message
+	var length uint32
+	if err := binary.Read(r, binary.BigEndian, &length); err != nil {
+		return fmt.Errorf("failed to read response length: %w", err)
+	}
+	log.Infof("Receiving message with length: %d", length)
+
+	// Response has no message type
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return fmt.Errorf("failed to read response payload: %w", err)
+	}
+
+	b := bytes.NewBuffer(payload)
+	if err := gob.NewDecoder(b).Decode(resp); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	log.Info("Received response", "payload", resp)
+	return nil
+}

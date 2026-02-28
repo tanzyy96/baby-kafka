@@ -19,7 +19,7 @@ type Config struct {
 
 func DefaultConfig() *Config {
 	return &Config{
-		BasePath:      "data",
+		BasePath:      "./data",
 		RolloverLimit: 1024 * 1024, // 1MB
 		ServerPort:    ":8080",
 	}
