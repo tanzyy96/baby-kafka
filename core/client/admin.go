@@ -27,9 +27,10 @@ func NewAdmin(addr string) (*Admin, error) {
 	}, nil
 }
 
-func (a *Admin) CreateTopic(topic string) (*proto.Response, error) {
+func (a *Admin) CreateTopic(topic string, numPartitions int32) (*proto.Response, error) {
 	payload := core.CreateTopicRequest{
-		Topic: topic,
+		Topic:         topic,
+		NumPartitions: numPartitions,
 	}
 
 	if err := writeRequest(a.w, core.MessageTypeCreateTopic, payload); err != nil {
@@ -39,7 +40,7 @@ func (a *Admin) CreateTopic(topic string) (*proto.Response, error) {
 		return nil, fmt.Errorf("failed to flush create topic request: %w", err)
 	}
 
-	log.Info("Create topic request sent", "topic", topic)
+	log.Info("Create topic request sent", "topic", topic, "numPartitions", numPartitions)
 
 	// Read response
 	var resp proto.Response

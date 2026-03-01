@@ -65,7 +65,7 @@ func ReadFrame(r io.Reader) (msgType int, payload []byte, err error) {
 	msgType = int(frame[0])
 	payload = frame[1:]
 
-	log.Info("ReadFrame", "msgType", msgType, "payloadLength", len(payload))
+	log.Debug("ReadFrame", "msgType", msgType, "payloadLength", len(payload))
 
 	return msgType, payload, nil
 }
@@ -82,12 +82,12 @@ func WriteFrame(w io.Writer, resp []byte) error {
 		return fmt.Errorf("failed to write response body: %w", err)
 	}
 
-	log.Info("WriteFrame", "length", length)
+	log.Debug("WriteFrame", "length", length)
 	return nil
 }
 
 func WriteError(w io.Writer, status Status, err error) error {
-	log.Info("Writing error response", "error", err)
+	log.Info("WriteError", "status", status, "error", err)
 
 	resp := Response{
 		Status: status,

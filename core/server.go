@@ -87,7 +87,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second)) // Set a read deadline to prevent hanging connections
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second)) // Set a read deadline to prevent hanging connections
 
 	// We need this goroutine to ensure that if the server is shutting down while a client is still connected, we can force close the connection to unblock any pending reads/writes. Otherwise, the server might hang indefinitely waiting for client activity.
 	go func() {
@@ -128,6 +128,8 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		}
 		// Response
 		proto.WriteFrame(conn, resp)
+
+		conn.SetReadDeadline(time.Now().Add(30 * time.Second)) // Set a read deadline to prevent hanging connections
 
 	}
 }

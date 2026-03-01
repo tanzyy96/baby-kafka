@@ -131,15 +131,15 @@ func (s *Server) handleConsume(payload []byte) (resp []byte, respErr error) {
 	}
 
 	// Perform consume
+	cResp := ConsumeResponse{}
 	msg, err := s.broker.Consume(req.Topic, req.PartitionIndex, req.Offset)
 	if err != nil && respErr == nil {
 		respErr = fmt.Errorf("failed to consume message: %w", err)
 		status = proto.StatusServerError
+	} else {
+		cResp.Message = *msg
 	}
 
-	cResp := ConsumeResponse{
-		Message: *msg,
-	}
 	data, encodeErr := cResp.Encode()
 	if encodeErr != nil && respErr == nil {
 		respErr = fmt.Errorf("failed to encode ConsumeResponse: %w", encodeErr)

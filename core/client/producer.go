@@ -7,6 +7,8 @@ import (
 
 	"baby-kafka/core"
 	"baby-kafka/core/proto"
+
+	"github.com/charmbracelet/log"
 )
 
 type Producer struct {
@@ -56,6 +58,8 @@ func (p *Producer) Send(topic string, key, value []byte) (*core.ProduceResponse,
 	if err := resp.DecodeData(&prodResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response.Data: %w", err)
 	}
+
+	log.Info("Sent message", "key", string(key), "value", string(value), "resp", prodResp)
 
 	return &prodResp, nil
 }

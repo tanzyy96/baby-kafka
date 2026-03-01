@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"strings"
 
 	"baby-kafka/core"
 	"baby-kafka/core/proto"
@@ -33,19 +34,21 @@ func NewConsumer(addr, topic string, partitionIndex int32, offset int64) (*Consu
 	}, nil
 }
 
-func (c *Consumer) Poll() (key []byte, value []byte, err error) {
+func (c *Consumer) Poll() (key []byte, value []byte, atOffset int64, err error) {
 	payload := core.ConsumeRequest{
 		Topic:          c.topic,
 		PartitionIndex: c.partitionIndex,
 		Offset:         c.offset,
 	}
 
+	atOffset = c.offset
+
 	if err := writeRequest(c.w, core.MessageTypeConsume, payload); err != nil {
-		return nil, nil, fmt.Errorf("failed to write consume request: %w", err)
+		return nil, nil, atOffset, fmt.Errorf("failed to write consume request: %w", err)
 	}
 
 	if err := c.w.Flush(); err != nil {
-		return nil, nil, fmt.Errorf("failed to flush consume request: %w", err)
+		return nil, nil, atOffset, fmt.Errorf("failed to flush consume request: %w", err)
 	}
 
 	var (
@@ -53,19 +56,23 @@ func (c *Consumer) Poll() (key []byte, value []byte, err error) {
 		resp  proto.Response
 	)
 	if err := readResponse(c.conn, &resp); err != nil {
-		return nil, nil, fmt.Errorf("failed to read consume response: %w", err)
+		return nil, nil, atOffset, fmt.Errorf("failed to read consume response: %w", err)
 	}
 
 	if resp.Status != proto.StatusOK {
-		return nil, nil, fmt.Errorf("consume request failed: %s", resp.Error)
+		// Manual check
+		if strings.Contains(resp.Error, core.ErrNoMessagesAtOffset.Error()) {
+			return nil, nil, 0, core.ErrNoMessagesAtOffset
+		}
+		return nil, nil, atOffset, fmt.Errorf("consume request failed: %s", resp.Error)
 	}
 
 	if err := resp.DecodeData(&cResp); err != nil {
-		return nil, nil, fmt.Errorf("failed to decode response.Data: %w", err)
+		return nil, nil, atOffset, fmt.Errorf("failed to decode response.Data: %w", err)
 	}
 
 	c.offset++ // Increment offset for next poll
-	return cResp.Key, cResp.Value, nil
+	return cResp.Key, cResp.Value, atOffset, nil
 }
 
 func (c *Consumer) Close() error {

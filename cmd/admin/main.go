@@ -35,6 +35,7 @@ func main() {
 	}
 
 	flag.Var(create, "create", "Create a topic with the given name")
+	numPartitions := flag.Int("num", 1, "numPartitions")
 
 	flag.Parse()
 
@@ -42,19 +43,19 @@ func main() {
 		log.Printf("Listing topic...")
 		adminListTopics(cfg.ServerPort)
 	} else if create.IsSet {
-		adminCreateTopic(cfg.ServerPort, create.Topic)
+		adminCreateTopic(cfg.ServerPort, create.Topic, *numPartitions)
 	} else {
 		log.Printf("No command provided. Use --create to create a topic or --list to list topics.")
 	}
 }
 
-func adminCreateTopic(addr, topic string) {
+func adminCreateTopic(addr, topic string, numPartitions int) {
 	admin, err := client.NewAdmin(addr)
 	if err != nil {
 		log.Fatalf("Failed to create admin client: %s", err)
 	}
 
-	resp, err := admin.CreateTopic(topic)
+	resp, err := admin.CreateTopic(topic, int32(numPartitions))
 	if err != nil {
 		log.Fatalf("Failed to create topic: %s", err)
 	}

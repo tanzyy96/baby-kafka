@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"sync"
 
 	"baby-kafka/core"
@@ -39,7 +40,7 @@ func runProducer(id int, addr, topic string) {
 	}
 
 	key := "key"
-	value := "Sent by producer " + string(rune(id))
+	value := fmt.Sprintf("Sent by producer %d", id)
 	if _, err := p.Send(topic, []byte(key), []byte(value)); err != nil {
 		log.Fatal("Failed to send message:", err)
 	}

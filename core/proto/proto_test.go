@@ -15,7 +15,7 @@ import (
 
 func TestProtoWriteFrame(t *testing.T) {
 	// OOOH: we can use bytes.Buffer as an in-memory stream to test our proto package's ReadFrame and WriteFrame functions!
-	b := &bytes.Buffer{}
+	mockConn := &bytes.Buffer{}
 
 	testData := []byte{1, 2, 3, 4, 5}
 
@@ -29,17 +29,17 @@ func TestProtoWriteFrame(t *testing.T) {
 	err := gob.NewEncoder(respBuffer).Encode(resp)
 	require.NoError(t, err)
 
-	err = proto.WriteFrame(b, respBuffer.Bytes())
+	err = proto.WriteFrame(mockConn, respBuffer.Bytes())
 	require.NoError(t, err)
 
 	// First 4 bytes: length
 	// N bytes: Encoded Response
 	var length uint32
-	err = binary.Read(b, binary.BigEndian, &length)
+	err = binary.Read(mockConn, binary.BigEndian, &length)
 	require.NoError(t, err)
 
 	frame := make([]byte, length)
-	_, err = io.ReadFull(b, frame)
+	_, err = io.ReadFull(mockConn, frame)
 	require.NoError(t, err)
 
 	var decoded proto.Response

@@ -26,7 +26,7 @@ func writeRequest(w *bufio.Writer, msgType int, payload interface{}) error {
 	length := uint32(1 + len(b.Bytes())) // 1 byte for message type + payload length
 	buffer := new(bytes.Buffer)
 
-	log.Info("Writing request of type", "msgType", msgType, "payload", payload, "type+payloadLength", length)
+	log.Debug("Writing request of type", "msgType", msgType, "type+payloadLength", length)
 
 	if err := binary.Write(buffer, binary.BigEndian, length); err != nil {
 		return fmt.Errorf("failed to write request length: %w", err)
@@ -45,15 +45,14 @@ func writeRequest(w *bufio.Writer, msgType int, payload interface{}) error {
 	return nil
 }
 
-// Protocol: 4 byte message length + N bytes payload (gob-encoded response struct for success, or "ERROR:<error message>" for error)
-// If this function returns error, that means the client request has issues. Server-sided error should be reflected in the resp
+// Protocol: 4 byte message length + N bytes payload (gob-encoded response struct)
 func readResponse(r io.Reader, resp *proto.Response) error {
 	// Read length of message
 	var length uint32
 	if err := binary.Read(r, binary.BigEndian, &length); err != nil {
 		return fmt.Errorf("failed to read response length: %w", err)
 	}
-	log.Infof("Receiving message with length: %d", length)
+	log.Debugf("Receiving message with length: %d", length)
 
 	// Response has no message type
 	payload := make([]byte, length)
@@ -66,6 +65,6 @@ func readResponse(r io.Reader, resp *proto.Response) error {
 		return fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	log.Info("Received response", "payload", resp)
+	log.Debug("Received response", "status", resp.Status, "error", resp.Error, "dataLength", len(resp.Data))
 	return nil
 }

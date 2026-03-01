@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"sync"
 	"time"
@@ -17,6 +18,8 @@ func main() {
 	count := flag.Int("count", 1, "number of consumers")
 	topic := flag.String("topic", "test", "topic")
 	partition := flag.Int("partition", 0, "partition")
+
+	flag.Parse()
 
 	wg := sync.WaitGroup{}
 
@@ -39,15 +42,18 @@ func runConsumer(id int, addr, topic string, partition int32) {
 	}
 
 	for {
-		key, value, err := c.Poll()
+		log.Info("Polling...", "id", id, "topic", topic, "partition", partition)
+		key, value, offset, err := c.Poll()
 		if err != nil {
-			if err == core.ErrNoMessagesAtOffset {
-				time.Sleep(5 * time.Second) // Backoff before polling again
+			if errors.Is(err, core.ErrNoMessagesAtOffset) {
+				log.Info("Nothing found. Waiting befor retrying...")
+				time.Sleep(3 * time.Second) // Backoff before polling again
 				continue                    // No messages, just poll again
 			} else {
-				log.Fatalf("Consumer %d failed to poll: %s", id, err)
+				log.Warnf("Consumer %d failed to poll: %s", id, err)
 			}
 		}
-		log.Infof("Consumer %d received message: key=%s value=%s", id, string(key), string(value))
+		log.Info("Consumer received message", "id", id, "partition", partition, "offset", offset, "key", string(key), "value", string(value))
+		time.Sleep(1 * time.Second)
 	}
 }

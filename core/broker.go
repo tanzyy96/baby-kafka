@@ -39,6 +39,9 @@ func NewBroker(basePath string, rolloverLimit int64) (*Broker, error) {
 }
 
 func (b *Broker) CreateTopic(key string, numPartitions int32) error {
+	if numPartitions == 0 {
+		return fmt.Errorf("numPartitions must be greater than zero")
+	}
 	if _, exists := b.topics[key]; exists {
 		return fmt.Errorf("topic with key already exists: %s", key)
 	}
