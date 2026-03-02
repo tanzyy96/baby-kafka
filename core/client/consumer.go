@@ -100,10 +100,6 @@ func (c *Consumer) CommitOffset(offset int64) error {
 	}
 
 	if resp.Status != proto.StatusOK {
-		// Manual check
-		if strings.Contains(resp.Error, core.ErrNoMessagesAtOffset.Error()) {
-			return core.ErrNoMessagesAtOffset
-		}
 		return fmt.Errorf("commitOffset request failed: %s", resp.Error)
 	}
 
@@ -134,6 +130,7 @@ func (c *Consumer) FetchOffset() (int64, error) {
 
 	if resp.Status != proto.StatusOK {
 		// Manual check for expected errors that aren't systemic errors
+		// Currently exceeding the offset limit will return ErrNoMessagesAtOffset
 		if strings.Contains(resp.Error, core.ErrNoMessagesAtOffset.Error()) {
 			return 0, core.ErrNoMessagesAtOffset
 		}

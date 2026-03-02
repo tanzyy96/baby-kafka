@@ -23,7 +23,7 @@ type Log struct {
 	file       *os.File
 	index      *LogIndex
 	size       int64
-	baseOffset int64
+	baseOffset int64 // Starts from 0 in the first log only, then non-zero for subsequent logs
 	nextOffset int64 // counter for number of appended messages, we use this to jump via index
 }
 
@@ -121,6 +121,9 @@ func (l *Log) Append(msg Message) (offset int64, bytePos int64, err error) {
 // so Read(1003) would translate to Read(3) on the log with baseOffset 1000
 func (l *Log) Read(absoluteOffset int64) (*Message, error) {
 	relativeOffset := absoluteOffset - l.baseOffset
+	if relativeOffset < 0 {
+		return nil, fmt.Errorf("absoluteOffset cannot be smaller than baseOffset of %d", l.baseOffset)
+	}
 	// We read the byte position from the index, then read the message from the log file at that byte position
 	bytePos, err := l.index.Read(int32(relativeOffset))
 	if err != nil {

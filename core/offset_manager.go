@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"baby-kafka/core/proto"
@@ -41,6 +42,7 @@ type OffsetManager struct {
 	// map[groupId]map[topicId]map[partitionId]offset
 	offsets     map[string]map[string]map[int32]int64
 	offsetTopic *Topic
+	mutex       sync.RWMutex
 }
 
 func NewOffsetManager(basePath string, rolloverLimit int64) (*OffsetManager, error) {
@@ -65,6 +67,9 @@ func LoadOffsetManager(basePath string, rolloverLimit int64) (*OffsetManager, er
 }
 
 func (om *OffsetManager) updateOffset(groupId string, topicId string, partitionId int32, newOffset int64) {
+	om.mutex.Lock()
+	defer om.mutex.Unlock()
+
 	_, exists := om.offsets[groupId]
 	if !exists {
 		om.offsets[groupId] = make(map[string]map[int32]int64)
@@ -92,11 +97,22 @@ func (om *OffsetManager) CommitOffset(groupId string, topicId string, partitionI
 }
 
 func (om *OffsetManager) Offset(groupId string, topicId string, partitionId int32) (int64, bool) {
-	v, ok := om.offsets[groupId][topicId][partitionId]
+	om.mutex.RLock()
+	defer om.mutex.RUnlock()
+	topics, ok := om.offsets[groupId]
+	if !ok {
+		return 0, false
+	}
+	partitions, ok := topics[topicId]
+	if !ok {
+		return 0, false
+	}
+	v, ok := partitions[partitionId]
 	return v, ok
 }
 
 func (om *OffsetManager) persistToLog(groupId string, topicId string, partitionId int32, newOffset int64) error {
+	now := time.Now()
 	key := OffsetKey{
 		GroupID:        groupId,
 		Topic:          topicId,
@@ -104,7 +120,7 @@ func (om *OffsetManager) persistToLog(groupId string, topicId string, partitionI
 	}
 	value := OffsetValue{
 		Offset:    newOffset,
-		CreatedAt: time.Now().Unix(),
+		CreatedAt: now.Unix(),
 	}
 	kb, err := proto.GobEncode(key)
 	if err != nil {
@@ -117,7 +133,7 @@ func (om *OffsetManager) persistToLog(groupId string, topicId string, partitionI
 	msg := Message{
 		Key:       kb,
 		Value:     kv,
-		CreatedAt: time.Time{},
+		CreatedAt: now,
 	}
 
 	if _, _, err = om.offsetTopic.Append(msg); err != nil {
@@ -138,23 +154,28 @@ func (om *OffsetManager) restore(basePath string, rolloverLimit int64) error {
 
 	for _, partition := range t.partitions {
 		for _, log := range partition.logs {
-			msg, err := log.Read(0)
-			if err != nil {
-				continue
+			// Go down every message to updateOffset
+			offset := log.baseOffset
+			for offset < log.nextOffset {
+				msg, err := log.Read(offset)
+				if err != nil {
+					break // should be done reading this log
+				}
+
+				key := OffsetKey{}
+				value := OffsetValue{}
+
+				if err := proto.GobDecode(msg.Key, &key); err != nil {
+					continue
+				}
+
+				if err := proto.GobDecode(msg.Value, &value); err != nil {
+					continue
+				}
+
+				om.updateOffset(key.GroupID, key.Topic, key.PartitionIndex, value.Offset)
+				offset++
 			}
-
-			key := OffsetKey{}
-			value := OffsetValue{}
-
-			if err := proto.GobDecode(msg.Key, key); err != nil {
-				continue
-			}
-
-			if err := proto.GobDecode(msg.Value, value); err != nil {
-				continue
-			}
-
-			om.updateOffset(key.GroupID, key.Topic, key.PartitionIndex, value.Offset)
 		}
 	}
 
