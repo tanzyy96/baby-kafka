@@ -35,8 +35,12 @@ type Broker struct {
 func NewBroker(basePath string, rolloverLimit int64) (*Broker, error) {
 	// Try creating the base path for the broker if it doesn't exist
 	if err := os.Mkdir(basePath, 0o755); err != nil {
-		log.Infof("Base path already exists, loading existing directory: %s", basePath)
-		return LoadBroker(basePath, rolloverLimit)
+		if os.IsExist(err) {
+			log.Infof("Base path already exists, loading existing directory: %s", basePath)
+			return LoadBroker(basePath, rolloverLimit)
+		} else {
+			return nil, fmt.Errorf("failed to init broker: %w", err)
+		}
 	}
 	topics := make(map[string]*Topic)
 	om, err := NewOffsetManager(basePath, rolloverLimit)

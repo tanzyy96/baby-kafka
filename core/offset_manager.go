@@ -80,11 +80,6 @@ func (om *OffsetManager) updateOffset(groupId string, topicId string, partitionI
 		om.offsets[groupId][topicId] = make(map[int32]int64)
 	}
 
-	_, exists = om.offsets[groupId][topicId][partitionId]
-	if !exists {
-		om.offsets[groupId][topicId][partitionId] = 0
-	}
-
 	om.offsets[groupId][topicId][partitionId] = newOffset
 }
 
