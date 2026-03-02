@@ -1,93 +1,100 @@
 # baby-kafka
-Baby learning Kafka internals
 
-Just me trying to learn about Kafka by implementing simple version of its core components.
+A from-scratch implementation of core Apache Kafka concepts in Go — built as a practical alternative to interview prep grinding, and as a way to genuinely understand a commonly used technology in distributed systems.
 
-## Components
-- [ ] Broker
-	- [x] Partition
-	- [x] Segment
-	- [x] Segment index
-	- [x] Network Protocol
-- [ ] Producer
-- [ ] Consumer
+## Motivation
 
-## Basic Features
-- [x] Append-only log
-- [x] Log indexing
-- [x] Supporting partition restarts
-- [ ] Send messages to a topic
-- [ ] Consume messages from a topic
-- [ ] Durability — data survives broker restarts
+Kafka seems to be a rather popular technology used in large companies tackling scalable systems.
 
-# Roadmap
-### Phase 1: The Log
-- [x] `Message` struct with `Key` and `Value`
-- [x] `Segment` — append to log file with length-prefixed gob encoding
-- [x] `Segment` — read from log file by byte position
-- [x] `Index` — write fixed-size binary entries (relative offset → byte position)
-- [x] `Index` — read byte position by absolute offset
-- [ ] `Index` — `LastOffset()` for recovery
-- [x] Wire `Segment` + `Index` together — `Append` writes to both, `Read` consults index first
-- [x] Segment naming convention (`%020d.log`, `%020d.index`)
-- [x] Tests for append/read round-trip
-- [x] Tests for durability (close and reopen)
+Rather than reading another blog post or grinding through more algorithm problems, I decided to build a simplified version from scratch. It's a more engaging way to study a system I'd been encountering in interview prep, and it gave me a chance to revisit Go and work on something I rarely touch in typical web development: low-level binary encoding and a custom TCP wire protocol.
 
-### Phase 2: The Partition
-- [x] `Partition` struct owns ordered slice of segments + pointer to active segment
-- [x] `Partition.Append` — write to active segment
-- [x] `Partition.Read` — find correct segment by base offset, then read
-- [ ] `findSegment(offset)` — binary search segments by base offset
-- [x] Segment rolling — open new segment when active exceeds `maxBytes`
-- [x] Partition recovery on startup — reconstruct segments from directory filenames
-- [x] Concurrent read safety with `sync.RWMutex`
-- [x] Tests for reads spanning multiple segments
-- [x] Tests for recovery after restart
+## What's Implemented
 
-### Phase 3: The Broker
-- [x] `Topic` struct owns map of partitions
-- [x] `Broker` struct owns map of topics
-- [x] Create topic API — specify partition count
-- [x] Partition assignment — `hash(key) % numPartitions` for keyed, round-robin for unkeyed
-- [ ] Integration test — produce 1000 messages, read them all back across partitions
+### Append-Only Log
 
-- [x] Introduce `Config` struct to manage broker configs
+At its core, Kafka is a file. Messages are appended to a `.log` file using a length-prefixed binary format. Alongside each log file is a `.index` file mapping offsets to byte positions, enabling O(1) seeks without scanning the entire log.
 
-### Phase 4: TCP Server + Wire Protocol
-- [x] TCP server that accepts connections
-- [x] Length-prefixed binary request/response protocol
-- [x] `Produce` request handler
-- [x] `Fetch` request handler
-- [x] `ListTopics` request handler
-- [x] Concurrent connection handling with goroutines
-- [x] Graceful shutdown
+### Partitions and Log Segments
 
-### Phase 5: Clients
-- [ ] `Producer` client — connect to broker, send messages
-- [ ] `Consumer` client — connect to broker, fetch from a given offset
-- [ ] Retry logic on connection failure
-- [ ] End-to-end test — producer and consumer over the network
+A partition is a sequence of log segments. When a segment exceeds a configurable size threshold (`rollover_limit`), a new segment is created — named after its starting offset. On startup, the partition reconstructs its state purely from the filenames on disk, which is how Kafka survives restarts without a separate metadata store.
 
-### Phase 6: Offset Management
-- [ ] `OffsetStore` — maps `(groupID, topic, partition)` → committed offset
-- [ ] `CommitOffset` request type
-- [ ] `FetchOffset` request type
-- [ ] Persist offset store to disk
-- [ ] Consumer resumes from committed offset on restart
-- [ ] Tests for crash recovery — commit, restart, verify resume point
+### Broker and Topic Routing
 
-### Phase 7: Hardening
-- [ ] Segment rolling by time (not just size)
-- [ ] CRC32 checksums on messages — verify on read
-- [ ] Index rebuild from log if index is missing or corrupt
-- [ ] Structured logging
-- [ ] Basic metrics — messages/sec, consumer lag
-- [ ] Stress test — concurrent producers and consumers, no messages lost or duplicated
+The broker owns a map of topics; each topic owns its partitions. Routing follows Kafka's actual semantics:
+- **Keyed messages** always route to the same partition via `fnv32a(key) % numPartitions`, guaranteeing ordering per key.
+- **Unkeyed messages** round-robin across partitions via an atomic counter.
 
-### Phase 8: Replication
-- [ ] Each partition has a leader and N followers
-- [ ] Followers replicate by fetching from leader
-- [ ] Leader tracks in-sync replicas (ISR)
-- [ ] Message only committed once all ISR acknowledge
-- [ ] Leader election on failure
-- [ ] Test — kill leader, verify follower takes over, no data loss
+### TCP Wire Protocol
+
+A custom binary framing protocol over raw TCP:
+
+```
+Request:  [4-byte length][1-byte message type][gob-encoded payload]
+Response: [4-byte length][gob-encoded Response{Status, Error, Data}]
+```
+
+Message types: `1=Produce`, `2=Consume`, `3=CreateTopic`, `4=ListTopics`
+
+Each connection is handled in a goroutine. This was the most interesting part of the project — thinking carefully about how to frame and delimit messages on a stream, rather than relying on HTTP or an existing RPC framework.
+
+### Clients
+
+Producer, consumer, and admin CLI clients that communicate with the broker over the wire protocol. End-to-end produce and consume flows work.
+
+## Architecture
+
+```
+TCP Server (:8080)
+    └── Broker          (owns topic map)
+         └── Topic      (routes to partitions)
+              └── Partition  (manages log segments)
+                   ├── Log       (append-only, length-prefixed)
+                   └── LogIndex  (offset → byte position)
+```
+
+## Data on Disk
+
+```
+./data/<topic>/partition-<N>/
+    00000000000000000000.log    # segment starting at offset 0
+    00000000000000000000.index
+    00000000000000000100.log    # rolled over at offset 100
+    00000000000000000100.index
+```
+
+The segment filename encodes its base offset. This is how the partition knows where each segment begins when recovering from disk on startup.
+
+## Running It
+
+```bash
+make run-broker        # Start the broker
+make setup             # Create a topic and send test messages
+make run-producer      # Send a message interactively
+make run-consumer      # Read messages back
+make fresh             # Wipe data directory and restart
+```
+
+Or use the CLI tools directly:
+
+```bash
+go run cmd/admin/main.go --create=mytopic --num=3
+go run cmd/producer/main.go --topic=mytopic --key=mykey
+go run cmd/consumer/main.go --topic=mytopic --partition=0 --offset=0
+```
+
+Configuration lives in `config.json`:
+
+```json
+{
+  "base_path": "./data",
+  "rollover_limit": 1048576,
+  "server_port": ":8080"
+}
+```
+
+## In Progress
+
+- **Consumer group offset persistence** — `core/offset_manager.go` exists but isn't fully integrated
+- **Replication** — leader/follower, ISR, leader election
+
+See [TODO.md](./TODO.md) for the full list.

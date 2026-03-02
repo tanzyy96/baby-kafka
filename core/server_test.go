@@ -13,6 +13,7 @@ func newTestServer(t *testing.T) *Server {
 
 	cfg := DefaultConfig()
 	cfg.BasePath = dir
+	cfg.ServerPort = ":0" // let OS pick a free port
 	s, err := NewServer(cfg)
 	require.NoError(t, err)
 

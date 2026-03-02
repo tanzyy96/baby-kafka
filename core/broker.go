@@ -1,11 +1,14 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/charmbracelet/log"
 )
+
+var ErrOffsetNotFound = errors.New("offset not found")
 
 // We don't really need this, but more for my own reference
 type BrokerInterface interface {
@@ -16,25 +19,53 @@ type BrokerInterface interface {
 	// For messaging
 	Produce(topicName string, msg Message) error
 	Consume(topicName string, partitionIndex int32, offset int64) (*Message, error)
+
+	// For offsets
+	FetchOffset(groupId, topic string, partitionIndex int32) (int64, error)
+	CommitOffset(groupId, topic string, partitionIndex int32, newOffset int64) error
 }
 
 type Broker struct {
 	topics        map[string]*Topic
 	basePath      string
 	rolloverLimit int64
+	offsetManager *OffsetManager
 }
 
 func NewBroker(basePath string, rolloverLimit int64) (*Broker, error) {
 	// Try creating the base path for the broker if it doesn't exist
 	if err := os.Mkdir(basePath, 0o755); err != nil {
 		log.Infof("Base path already exists, loading existing directory: %s", basePath)
-		// TODO: LoadBroker()
+		return LoadBroker(basePath, rolloverLimit)
 	}
 	topics := make(map[string]*Topic)
+	om, err := NewOffsetManager(basePath, rolloverLimit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init broker: %w", err)
+	}
 	return &Broker{
 		topics:        topics,
 		basePath:      basePath,
 		rolloverLimit: rolloverLimit,
+		offsetManager: om,
+	}, nil
+}
+
+func LoadBroker(basePath string, rolloverLimit int64) (*Broker, error) {
+	topics, err := LoadTopics(basePath, rolloverLimit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load broker: %w", err)
+	}
+	om, err := LoadOffsetManager(basePath, rolloverLimit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load broker: %w", err)
+	}
+
+	return &Broker{
+		topics:        topics,
+		basePath:      basePath,
+		rolloverLimit: rolloverLimit,
+		offsetManager: om,
 	}, nil
 }
 
@@ -86,4 +117,18 @@ func (b *Broker) Consume(topicName string, partitionIndex int32, offset int64) (
 		return nil, fmt.Errorf("failed to consume message: %w", err)
 	}
 	return topic.ReadAt(partitionIndex, offset)
+}
+
+func (b *Broker) FetchOffset(groupId, topic string, partitionIndex int32) (int64, error) {
+	offset, ok := b.offsetManager.Offset(groupId, topic, partitionIndex)
+	if !ok {
+		return 0, ErrOffsetNotFound
+	}
+
+	return offset, nil
+}
+
+func (b *Broker) CommitOffset(groupId, topic string, partitionIndex int32, newOffset int64) error {
+	b.offsetManager.CommitOffset(groupId, topic, partitionIndex, newOffset)
+	return nil
 }

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"encoding/gob"
 	"fmt"
 	"io"
 
@@ -15,13 +14,14 @@ import (
 
 // Protocol: 4 byte message length + 1 byte message type + N bytes payload
 func writeRequest(w *bufio.Writer, msgType int, payload interface{}) error {
-	b := new(bytes.Buffer)
 	if payload == nil {
 		payload = struct{}{}
 	}
-	if err := gob.NewEncoder(b).Encode(payload); err != nil {
+	encoded, err := proto.GobEncode(payload)
+	if err != nil {
 		return fmt.Errorf("failed to encode produce request: %w", err)
 	}
+	b := bytes.NewBuffer(encoded)
 
 	length := uint32(1 + len(b.Bytes())) // 1 byte for message type + payload length
 	buffer := new(bytes.Buffer)
@@ -38,7 +38,7 @@ func writeRequest(w *bufio.Writer, msgType int, payload interface{}) error {
 		return fmt.Errorf("failed to write request payload: %w", err)
 	}
 
-	_, err := w.Write(buffer.Bytes())
+	_, err = w.Write(buffer.Bytes())
 	if err != nil {
 		return err
 	}
@@ -60,8 +60,7 @@ func readResponse(r io.Reader, resp *proto.Response) error {
 		return fmt.Errorf("failed to read response payload: %w", err)
 	}
 
-	b := bytes.NewBuffer(payload)
-	if err := gob.NewDecoder(b).Decode(resp); err != nil {
+	if err := proto.GobDecode(payload, resp); err != nil {
 		return fmt.Errorf("failed to decode response: %w", err)
 	}
 

@@ -23,10 +23,12 @@ Wire protocol:
 */
 
 const (
-	MessageTypeProduce     = 1
-	MessageTypeConsume     = 2
-	MessageTypeCreateTopic = 3
-	MessageTypeListTopics  = 4
+	MessageTypeProduce      = 1
+	MessageTypeConsume      = 2
+	MessageTypeCreateTopic  = 3
+	MessageTypeListTopics   = 4
+	MessageTypeFetchOffset  = 5
+	MessageTypeCommitOffset = 6
 )
 
 type Server struct {
@@ -118,6 +120,10 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 			resp, err = s.handleCreateTopic(payload)
 		case MessageTypeListTopics:
 			resp, err = s.handleListTopics()
+		case MessageTypeFetchOffset:
+			resp, err = s.handleFetchOffset(payload)
+		case MessageTypeCommitOffset:
+			resp, err = s.handleCommitOffset(payload)
 		default:
 			err = fmt.Errorf("unknown message type: %d", msgType)
 		}

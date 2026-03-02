@@ -18,6 +18,7 @@ func main() {
 	count := flag.Int("count", 1, "number of consumers")
 	topic := flag.String("topic", "test", "topic")
 	partition := flag.Int("partition", 0, "partition")
+	groupId := flag.String("group", "testGroup", "consumer group id")
 
 	flag.Parse()
 
@@ -28,25 +29,35 @@ func main() {
 
 		go func(id int) {
 			defer wg.Done()
-			runConsumer(id, cfg.ServerPort, *topic, int32(*partition))
+			runConsumer(id, cfg.ServerPort, *groupId, *topic, int32(*partition))
 		}(i)
 	}
 
 	wg.Wait()
 }
 
-func runConsumer(id int, addr, topic string, partition int32) {
-	c, err := client.NewConsumer(addr, topic, partition, 0)
+func runConsumer(id int, addr, groupId, topic string, partition int32) {
+	c, err := client.NewConsumer(addr, groupId, topic, partition, 0)
 	if err != nil {
 		log.Fatalf("Failed to create consumer %d: %s", id, err)
 	}
 
+	offset, err := c.FetchOffset()
+	if err != nil {
+		if errors.Is(err, core.ErrOffsetNotFound) {
+			log.Info("No prior offset found.")
+		} else {
+			log.Warnf("Failed to fetch previous offset, restarting from 0: %s", err.Error())
+		}
+	}
+
+	log.Infof("Resuming from offset: %d", offset)
+
 	for {
-		log.Info("Polling...", "id", id, "topic", topic, "partition", partition)
+		log.Info("Polling...", "id", id, "groupId", groupId, "topic", topic, "partition", partition)
 		key, value, offset, err := c.Poll()
 		if err != nil {
 			if errors.Is(err, core.ErrNoMessagesAtOffset) {
-				log.Info("Nothing found. Waiting befor retrying...")
 				time.Sleep(3 * time.Second) // Backoff before polling again
 				continue                    // No messages, just poll again
 			} else {
@@ -54,6 +65,10 @@ func runConsumer(id int, addr, topic string, partition int32) {
 			}
 		}
 		log.Info("Consumer received message", "id", id, "partition", partition, "offset", offset, "key", string(key), "value", string(value))
+		if err := c.CommitOffset(offset); err != nil {
+			log.Warn("Consumer failed to commit offset")
+		}
+		log.Info("Committed offset", "offset", offset)
 		time.Sleep(1 * time.Second)
 	}
 }

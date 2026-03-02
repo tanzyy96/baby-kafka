@@ -3,7 +3,11 @@ package core
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
+
+	"github.com/charmbracelet/log"
 )
 
 const MAX_SIZE int64 = 1000 // 1kb
@@ -56,8 +60,39 @@ func NewPartition(index int32, folderPath string, maxSize int64) (*Partition, er
 	}, nil
 }
 
+func LoadPartitions(basePath string, maxSize int64) (partitions map[int32]*Partition, err error) {
+	f, err := os.ReadDir(basePath)
+	if err != nil {
+		return nil, err
+	}
+	partitions = make(map[int32]*Partition)
+
+	// Consider chance of rubbish files
+	for _, f := range f {
+		if !f.IsDir() || !strings.Contains(f.Name(), "partition-") {
+			log.Warnf("skipping loading of %s", f.Name())
+			continue
+		}
+		parts := strings.Split(f.Name(), "-")
+		idx := parts[len(parts)-1]
+		pidx, err := strconv.Atoi(idx)
+		if err != nil {
+			log.Warn("unable to load partition file", "name", f.Name())
+			continue
+		}
+		p, err := LoadPartition(int32(pidx), basePath, maxSize)
+		if err != nil {
+			log.Warnf("unable to load partition file %s: %s", f.Name(), err.Error())
+			continue
+		}
+		partitions[int32(pidx)] = p
+	}
+
+	return partitions, nil
+}
+
 // Read existing logs in the partition folder and set the active log to the last one. This is used when we restart the server and need to load existing partitions.
-func LoadPartition(index int64, folderPath string, maxSize int64) (*Partition, error) {
+func LoadPartition(index int32, folderPath string, maxSize int64) (*Partition, error) {
 	partitionPath := fmt.Sprintf("%s/partition-%d", folderPath, index)
 	if _, err := os.Stat(partitionPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("partition %s directory not found", partitionPath)
@@ -77,12 +112,11 @@ func LoadPartition(index int64, folderPath string, maxSize int64) (*Partition, e
 			continue
 		}
 		path := fmt.Sprintf("%s/%s", partitionPath, file.Name())
-		log, err := LoadLog(path)
+		lg, err := LoadLog(path)
 		if err != nil {
-			// TODO: maybe intro a module-level logger
-			fmt.Printf("failed to load log at %s: %v\n", path, err)
+			log.Warnf("failed to load log at %s: %v\n", path, err)
 		}
-		logs = append(logs, log)
+		logs = append(logs, lg)
 	}
 
 	// Determine active log based on max offset
@@ -90,6 +124,7 @@ func LoadPartition(index int64, folderPath string, maxSize int64) (*Partition, e
 
 	return &Partition{
 		Path:      partitionPath,
+		Index:     index,
 		maxSize:   maxSize,
 		logs:      logs,
 		activeLog: log,

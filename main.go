@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"os"
 	"os/signal"
 
@@ -11,6 +12,14 @@ import (
 )
 
 func main() {
+	debug := flag.Bool("debug", false, "enable debug logs")
+
+	flag.Parse()
+
+	if *debug {
+		log.SetLevel(log.DebugLevel)
+	}
+
 	cfg := core.LoadConfig()
 	srv, err := core.NewServer(cfg)
 	if err != nil {

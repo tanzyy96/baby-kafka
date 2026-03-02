@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 
 	"baby-kafka/internal/utils"
+
+	"github.com/charmbracelet/log"
 )
 
 /*
@@ -49,6 +51,51 @@ func NewTopic(key string, numPartition int32, folderPath string, rolloverLimit i
 		partitions:    partitions,
 		numPartitions: numPartition,
 	}, nil
+}
+
+func LoadTopic(topic, topicPath string, rolloverLimit int64) (*Topic, error) {
+	partitions, err := LoadPartitions(topicPath, rolloverLimit)
+	if err != nil {
+		return nil, err
+	}
+	numPartitions := len(partitions)
+
+	if topic != offsetTopic {
+		log.Info("Loaded", "topic", topic, "numPartitions", numPartitions)
+	}
+
+	return &Topic{
+		Key:           topic,
+		folderPath:    topicPath,
+		partitions:    partitions,
+		numPartitions: int32(numPartitions),
+		counter:       atomic.Uint64{},
+	}, nil
+}
+
+// Scan the directories to restore the topic states
+func LoadTopics(basePath string, rolloverLimit int64) (map[string]*Topic, error) {
+	folders, err := os.ReadDir(basePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load topics: %w", err)
+	}
+	topics := make(map[string]*Topic)
+
+	for _, folder := range folders {
+		if !folder.IsDir() || folder.Name() == offsetTopic {
+			continue
+		}
+		folderPath := fmt.Sprintf("%s/%s", basePath, folder.Name())
+
+		t, err := LoadTopic(folder.Name(), folderPath, rolloverLimit)
+		if err != nil {
+			log.Warnf("failed to load partition at %s: %s", folder.Name(), err.Error())
+			continue
+		}
+		topics[t.Key] = t
+	}
+
+	return topics, nil
 }
 
 func (t *Topic) nextPartition(key *string) (*Partition, error) {

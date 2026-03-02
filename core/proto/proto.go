@@ -27,10 +27,7 @@ type (
 )
 
 func (r *Response) DecodeData(resp interface{}) error {
-	if err := gob.NewDecoder(bytes.NewReader(r.Data)).Decode(resp); err != nil {
-		return err
-	}
-	return nil
+	return GobDecode(r.Data, resp)
 }
 
 const (
@@ -93,9 +90,23 @@ func WriteError(w io.Writer, status Status, err error) error {
 		Status: status,
 		Error:  err.Error(),
 	}
-	b := new(bytes.Buffer)
-	if err := gob.NewEncoder(b).Encode(&resp); err != nil {
-		return fmt.Errorf("failed to encode error response: %w", err)
+	b, encErr := GobEncode(&resp)
+	if encErr != nil {
+		return fmt.Errorf("failed to encode error response: %w", encErr)
 	}
-	return WriteFrame(w, b.Bytes())
+	return WriteFrame(w, b)
+}
+
+// GobEncode serialises v with gob and returns the resulting bytes.
+func GobEncode(v any) ([]byte, error) {
+	var b bytes.Buffer
+	if err := gob.NewEncoder(&b).Encode(v); err != nil {
+		return nil, fmt.Errorf("gob encode: %w", err)
+	}
+	return b.Bytes(), nil
+}
+
+// GobDecode deserialises gob-encoded data into v (must be a pointer).
+func GobDecode(data []byte, v any) error {
+	return gob.NewDecoder(bytes.NewReader(data)).Decode(v)
 }
