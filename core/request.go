@@ -72,6 +72,7 @@ func (s *Server) handleProduce(payload []byte) (resp []byte, respErr error) {
 		status = proto.StatusBadRequest
 	}
 
+	log.Debugf("Produce: topic=%s", req.Topic)
 	partitionIndex, offset, err := s.broker.Produce(req.Topic, *NewMessage(req.Key, req.Value))
 	if err != nil && respErr == nil {
 		respErr = fmt.Errorf("failed to produce message: %w", err)
@@ -109,6 +110,7 @@ func (s *Server) handleConsume(payload []byte) (resp []byte, respErr error) {
 		status = proto.StatusBadRequest
 	}
 
+	log.Debugf("Consume: group=%s topic=%s partition=%d offset=%d", req.GroupId, req.Topic, req.PartitionIndex, req.Offset)
 	cResp := ConsumeResponse{}
 	msg, err := s.broker.Consume(req.Topic, req.PartitionIndex, req.Offset)
 	if err != nil && respErr == nil {
@@ -146,6 +148,7 @@ func (s *Server) handleCreateTopic(payload []byte) (resp []byte, err error) {
 		err = fmt.Errorf("failed to decode create topic request: %v", decodeErr)
 	}
 
+	log.Debugf("CreateTopic: topic=%s numPartitions=%d", req.Topic, req.NumPartitions)
 	if createErr := s.broker.CreateTopic(req.Topic, req.NumPartitions); createErr != nil && err == nil {
 		err = fmt.Errorf("failed to create topic: %v", createErr)
 	}
@@ -192,6 +195,7 @@ func (s *Server) handleFetchOffset(payload []byte) (resp []byte, err error) {
 		err = fmt.Errorf("failed to decode fetch offset request: %v", decodeErr)
 	}
 
+	log.Debugf("FetchOffset: group=%s topic=%s partition=%d", req.GroupId, req.Topic, req.PartitionIndex)
 	offset, fetchErr := s.broker.FetchOffset(req.GroupId, req.Topic, req.PartitionIndex)
 	if fetchErr != nil && err == nil {
 		err = fmt.Errorf("failed to fetch offset: %v", fetchErr)
@@ -230,6 +234,7 @@ func (s *Server) handleCommitOffset(payload []byte) (resp []byte, err error) {
 		err = fmt.Errorf("failed to decode commit offset request: %v", decodeErr)
 	}
 
+	log.Debugf("CommitOffset: group=%s topic=%s partition=%d offset=%d", req.GroupId, req.Topic, req.PartitionIndex, req.Offset)
 	if commitErr := s.broker.CommitOffset(req.GroupId, req.Topic, req.PartitionIndex, req.Offset); commitErr != nil && err == nil {
 		err = fmt.Errorf("failed to commit offset: %v", commitErr)
 	}

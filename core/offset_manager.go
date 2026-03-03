@@ -147,12 +147,15 @@ func (om *OffsetManager) restore(basePath string, rolloverLimit int64) error {
 	om.offsetTopic = t
 	om.offsets = make(map[string]map[string]map[int32]int64)
 
+	restored := 0
+	skipped := 0
+
 	for _, partition := range t.partitions {
-		for _, log := range partition.logs {
+		for _, lg := range partition.logs {
 			// Go down every message to updateOffset
-			offset := log.baseOffset
-			for offset < log.nextOffset {
-				msg, err := log.Read(offset)
+			offset := lg.baseOffset
+			for offset < lg.nextOffset {
+				msg, err := lg.Read(offset)
 				if err != nil {
 					break // should be done reading this log
 				}
@@ -161,18 +164,26 @@ func (om *OffsetManager) restore(basePath string, rolloverLimit int64) error {
 				value := OffsetValue{}
 
 				if err := proto.GobDecode(msg.Key, &key); err != nil {
+					log.Warnf("restore: skipping record at offset %d: failed to decode key: %v", offset, err)
+					skipped++
+					offset++
 					continue
 				}
 
 				if err := proto.GobDecode(msg.Value, &value); err != nil {
+					log.Warnf("restore: skipping record at offset %d: failed to decode value: %v", offset, err)
+					skipped++
+					offset++
 					continue
 				}
 
 				om.updateOffset(key.GroupID, key.Topic, key.PartitionIndex, value.Offset)
+				restored++
 				offset++
 			}
 		}
 	}
 
+	log.Infof("Restored %d offset(s) from log (%d record(s) skipped)", restored, skipped)
 	return nil
 }

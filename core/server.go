@@ -78,6 +78,7 @@ func (s *Server) Start(ctx context.Context) error {
 			}
 		}
 
+		log.Debugf("New connection from %s", conn.RemoteAddr())
 		wg.Add(1)
 		go func() {
 			// Track active connections and wait for them to finish before shutting down the server
@@ -125,6 +126,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		case MessageTypeCommitOffset:
 			resp, err = s.handleCommitOffset(payload)
 		default:
+			log.Warnf("Unknown message type received: %d", msgType)
 			err = fmt.Errorf("unknown message type: %d", msgType)
 		}
 

@@ -42,7 +42,7 @@ func NewPartition(index int32, folderPath string, maxSize int64) (*Partition, er
 		return nil, fmt.Errorf("failed to create partition directory: %w", err)
 	}
 
-	log, err := NewLog(0, partitionPath)
+	firstLog, err := NewLog(0, partitionPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create partition: %w", err)
 	}
@@ -54,8 +54,8 @@ func NewPartition(index int32, folderPath string, maxSize int64) (*Partition, er
 	return &Partition{
 		Path:      partitionPath,
 		Index:     index,
-		activeLog: log,
-		logs:      []*Log{log},
+		activeLog: firstLog,
+		logs:      []*Log{firstLog},
 		maxSize:   maxSize,
 	}, nil
 }
@@ -120,14 +120,15 @@ func LoadPartition(index int32, folderPath string, maxSize int64) (*Partition, e
 	}
 
 	// Determine active log based on max offset
-	log := activeLog(logs)
+	active := activeLog(logs)
+	log.Infof("Loaded partition %d with %d log segment(s)", index, len(logs))
 
 	return &Partition{
 		Path:      partitionPath,
 		Index:     index,
 		maxSize:   maxSize,
 		logs:      logs,
-		activeLog: log,
+		activeLog: active,
 	}, nil
 }
 
@@ -161,10 +162,12 @@ func (p *Partition) ReadAt(offset int64) (*Message, error) {
 
 // Rollover creates a new log file and sets it as the active log. The old log is added to the logs array.
 func (p *Partition) rollover() error {
-	newLog, err := NewLog(p.activeLog.baseOffset+p.activeLog.nextOffset, p.Path)
+	newBaseOffset := p.activeLog.baseOffset + p.activeLog.nextOffset
+	newLog, err := NewLog(newBaseOffset, p.Path)
 	if err != nil {
 		return fmt.Errorf("failed to perform log rollover: %w", err)
 	}
+	log.Infof("Partition %d rolling over: new segment at offset %d (total segments: %d)", p.Index, newBaseOffset, len(p.logs)+1)
 	p.activeLog = newLog
 	p.logs = append(p.logs, newLog)
 
