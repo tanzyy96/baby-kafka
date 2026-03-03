@@ -2,6 +2,8 @@
 
 A from-scratch implementation of core Apache Kafka concepts in Go — mainly to understand its internals. Written mostly by hand / with Copilot, with Claude doing code reviews, guidance and writing tests.
 
+![output](https://github.com/user-attachments/assets/907bbc05-0dee-4c45-9034-140fe9970c8d)
+
 ## Motivation
 
 Kafka seems to be a rather popular technology used in large companies tackling scalable systems.
