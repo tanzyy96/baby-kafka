@@ -140,6 +140,10 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	}
 }
 
+func (s *Server) Addr() string {
+	return (*s.listener).Addr().String()
+}
+
 func (s *Server) Stop() error {
 	return (*s.listener).Close()
 }

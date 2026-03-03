@@ -28,9 +28,9 @@ func TestTopicAppendAndReadWithKey(t *testing.T) {
 		name string
 		msg  core.Message
 	}{
-		{"msg1", core.Message{Key: []byte("key1"), Value: []byte("value1")}},
-		{"msg2", core.Message{Key: []byte("key1"), Value: []byte("value2")}},
-		{"msg3", core.Message{Key: []byte("key2"), Value: []byte("value3")}},
+		{"msg1", *core.NewMessage([]byte("key1"), []byte("value1"))},
+		{"msg2", *core.NewMessage([]byte("key1"), []byte("value2"))},
+		{"msg3", *core.NewMessage([]byte("key2"), []byte("value3"))},
 	}
 
 	for _, tt := range tests {
@@ -67,8 +67,8 @@ func TestTopicAppendAndReadWithoutKey(t *testing.T) {
 	topic := newTestTopic(t)
 
 	messages := []core.Message{
-		{Key: []byte{}, Value: []byte("value1")},
-		{Key: []byte{}, Value: []byte("value2")},
+		*core.NewMessage(nil, []byte("value1")),
+		*core.NewMessage(nil, []byte("value2")),
 	}
 
 	for _, msg := range messages {

@@ -55,6 +55,10 @@ func (a *Admin) CreateTopic(topic string, numPartitions int32) (*proto.Response,
 	return &resp, nil
 }
 
+func (a *Admin) Close() error {
+	return a.conn.Close()
+}
+
 func (a *Admin) ListTopics() (*core.ListTopicsResponse, error) {
 	if err := writeRequest(a.w, core.MessageTypeListTopics, nil); err != nil {
 		return nil, fmt.Errorf("failed to write list topics request: %w", err)

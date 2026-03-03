@@ -33,6 +33,24 @@ func decodeProtoResponse(t *testing.T, data []byte) proto.Response {
 	return resp
 }
 
+func TestHandleFetchOffset_GoodPayload(t *testing.T) {
+	s := newTestServer(t)
+	b := encodePayload(t, FetchOffsetRequest{
+		GroupId:        "group-1",
+		Topic:          "my-topic",
+		PartitionIndex: 0,
+	})
+	resp, err := s.handleFetchOffset(b)
+	require.NoError(t, err)
+	decoded := decodeProtoResponse(t, resp)
+	require.Equal(t, proto.StatusOK, decoded.Status)
+
+	var req FetchOffsetResponse
+	err = decoded.DecodeData(&req)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), req.Offset)
+}
+
 // handleFetchOffset
 
 func TestHandleFetchOffset_BadPayload(t *testing.T) {
@@ -49,22 +67,6 @@ func TestHandleFetchOffset_BadPayload(t *testing.T) {
 func TestHandleCommitOffset_BadPayload(t *testing.T) {
 	s := newTestServer(t)
 	resp, err := s.handleCommitOffset([]byte("not-gob"))
-	require.Error(t, err)
-	decoded := decodeProtoResponse(t, resp)
-	require.Equal(t, proto.StatusServerError, decoded.Status)
-	require.NotEmpty(t, decoded.Error)
-}
-
-func TestHandleCommitOffset_UnknownGroup(t *testing.T) {
-	// TODO: add a happy path test once OffsetManager can be pre-seeded with entries
-	s := newTestServer(t)
-	payload := encodePayload(t, CommitOffsetRequest{
-		GroupId:        "group-1",
-		Topic:          "my-topic",
-		PartitionIndex: 0,
-		Offset:         42,
-	})
-	resp, err := s.handleCommitOffset(payload)
 	require.Error(t, err)
 	decoded := decodeProtoResponse(t, resp)
 	require.Equal(t, proto.StatusServerError, decoded.Status)

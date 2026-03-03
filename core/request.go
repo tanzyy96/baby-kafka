@@ -72,7 +72,7 @@ func (s *Server) handleProduce(payload []byte) (resp []byte, respErr error) {
 		status = proto.StatusBadRequest
 	}
 
-	partitionIndex, offset, err := s.broker.Produce(req.Topic, Message{Key: req.Key, Value: req.Value})
+	partitionIndex, offset, err := s.broker.Produce(req.Topic, *NewMessage(req.Key, req.Value))
 	if err != nil && respErr == nil {
 		respErr = fmt.Errorf("failed to produce message: %w", err)
 		status = proto.StatusServerError

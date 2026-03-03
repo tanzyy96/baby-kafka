@@ -23,7 +23,7 @@ func TestProducerSend(t *testing.T) {
 			PartitionIndex: 1,
 			Offset:         2,
 		}
-		data, err := pResp.Encode()
+		data, err := proto.GobEncode(pResp)
 		require.NoError(t, err)
 
 		resp := proto.Response{

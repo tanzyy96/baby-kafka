@@ -39,8 +39,8 @@ func TestPartitionAppendAndReadAt(t *testing.T) {
 	partition := newTestPartition(t, 0)
 
 	messages := []core.Message{
-		{Key: []byte("key1"), Value: []byte("value1")},
-		{Key: []byte("key2"), Value: []byte("value2")},
+		*core.NewMessage([]byte("key1"), []byte("value1")),
+		*core.NewMessage([]byte("key2"), []byte("value2")),
 	}
 
 	for i, msg := range messages {
@@ -81,8 +81,8 @@ func TestPartitionReadAtWithRollover(t *testing.T) {
 	partition := newTestPartition(t, 1)
 
 	messages := []core.Message{
-		{Key: []byte("key1"), Value: []byte("value1")},
-		{Key: []byte("key2"), Value: []byte("value2")},
+		*core.NewMessage([]byte("key1"), []byte("value1")),
+		*core.NewMessage([]byte("key2"), []byte("value2")),
 	}
 
 	for _, msg := range messages {
@@ -108,8 +108,8 @@ func TestLoadPartition(t *testing.T) {
 	partition := newTestPartition(t, 1)
 
 	messages := []core.Message{
-		{Key: []byte("key1"), Value: []byte("value1")},
-		{Key: []byte("key2"), Value: []byte("value2")},
+		*core.NewMessage([]byte("key1"), []byte("value1")),
+		*core.NewMessage([]byte("key2"), []byte("value2")),
 	}
 
 	for _, msg := range messages {
@@ -136,7 +136,7 @@ func TestLoadPartition(t *testing.T) {
 
 	// Writing and reading new messages as well
 	newMessages := []core.Message{
-		{Key: []byte("key3"), Value: []byte("value3")},
+		*core.NewMessage([]byte("key3"), []byte("value3")),
 	}
 
 	messages = append(messages, newMessages...)

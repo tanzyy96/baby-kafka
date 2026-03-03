@@ -55,7 +55,7 @@ func TestReadAt_ReturnsOriginalMessage(t *testing.T) {
 	log := newTestLog(t)
 
 	// Append a message to the log
-	msg := core.Message{Key: []byte("key1"), Value: []byte("value1")}
+	msg := *core.NewMessage([]byte("key1"), []byte("value1"))
 	_, _, err := log.Append(msg)
 	require.NoError(t, err)
 
@@ -70,9 +70,9 @@ func TestReadAt_MultipleMessages(t *testing.T) {
 	// append multiple messages and read them back to ensure offsets are correct
 	log := newTestLog(t)
 	messages := []core.Message{
-		{Key: []byte("key1"), Value: []byte("value1")},
-		{Key: []byte("key2"), Value: []byte("value2")},
-		{Key: []byte("key3"), Value: []byte("value3")},
+		*core.NewMessage([]byte("key1"), []byte("value1")),
+		*core.NewMessage([]byte("key2"), []byte("value2")),
+		*core.NewMessage([]byte("key3"), []byte("value3")),
 	}
 
 	for _, msg := range messages {
@@ -104,4 +104,37 @@ func TestReadAt_InvalidOffset(t *testing.T) {
 	// Attempt to read from an invalid offset
 	_, err = log.ReadAt(9999) // Offset beyond the end of the log
 	require.Error(t, err)
+}
+
+func TestReadAt_NewMessage_PassesChecksumVerification(t *testing.T) {
+	// Messages created via NewMessage should round-trip through the log
+	// without triggering checksum errors
+	lg := newTestLog(t)
+
+	msg := core.NewMessage([]byte("key"), []byte("value"))
+	_, _, err := lg.Append(*msg)
+	require.NoError(t, err)
+
+	readMsg, err := lg.ReadAt(0)
+	require.NoError(t, err)
+	require.Equal(t, msg.Key, readMsg.Key)
+	require.Equal(t, msg.Value, readMsg.Value)
+}
+
+func TestReadAt_CorruptChecksum_ReturnsError(t *testing.T) {
+	// If a message is written with an intentionally wrong checksum,
+	// reading it back should return a checksum error
+	lg := newTestLog(t)
+
+	msg := core.Message{
+		Key:      []byte("key"),
+		Value:    []byte("value"),
+		Checksum: 99999, // intentionally wrong
+	}
+	_, _, err := lg.Append(msg)
+	require.NoError(t, err)
+
+	_, err = lg.ReadAt(0)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "checksum")
 }

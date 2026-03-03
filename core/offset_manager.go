@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -58,6 +59,11 @@ func NewOffsetManager(basePath string, rolloverLimit int64) (*OffsetManager, err
 }
 
 func LoadOffsetManager(basePath string, rolloverLimit int64) (*OffsetManager, error) {
+	offsetPath := fmt.Sprintf("%s/%s", basePath, offsetTopic)
+	if _, err := os.Stat(offsetPath); os.IsNotExist(err) {
+		return NewOffsetManager(basePath, rolloverLimit)
+	}
+
 	om := &OffsetManager{}
 	if err := om.restore(basePath, rolloverLimit); err != nil {
 		return nil, fmt.Errorf("failed to load offset manager: %w", err)
@@ -125,13 +131,7 @@ func (om *OffsetManager) persistToLog(groupId string, topicId string, partitionI
 	if err != nil {
 		return err
 	}
-	msg := Message{
-		Key:       kb,
-		Value:     kv,
-		CreatedAt: now,
-	}
-
-	if _, _, err = om.offsetTopic.Append(msg); err != nil {
+	if _, _, err = om.offsetTopic.Append(*NewMessage(kb, kv)); err != nil {
 		return err
 	}
 

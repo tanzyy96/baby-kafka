@@ -30,8 +30,8 @@
 - [x] Partition assignment — `hash(key) % numPartitions` for keyed, round-robin for unkeyed
 - [x] Introduce `Config` struct to manage broker configs
 - [ ] Integration test — produce 1000 messages, read them all back across partitions
-- [ ] Persist broker configs in `config.json`
-- [ ] Loads broker if existing data directories exist via `LoadBroker`
+- [x] Persist broker configs in `config.json`
+- [x] Loads broker if existing data directories exist via `LoadBroker`
 
 ## Phase 4: TCP Server + Wire Protocol
 - [x] TCP server that accepts connections
@@ -49,18 +49,18 @@
 - [ ] Retry logic on connection failure
 
 ## Phase 6: Offset Management
-- [ ] `OffsetStore` — maps `(groupID, topic, partition)` → committed offset
-- [ ] `CommitOffset` request type
-- [ ] `FetchOffset` request type
-- [ ] Persist offset store to disk
-- [ ] Consumer resumes from committed offset on restart
-- [ ] Tests for crash recovery — commit, restart, verify resume point
+- [x] `OffsetStore` — maps `(groupID, topic, partition)` → committed offset
+- [x] `CommitOffset` request type
+- [x] `FetchOffset` request type
+- [x] Persist offset store to disk
+- [x] Consumer resumes from committed offset on restart
+- [x] Tests for crash recovery — commit, restart, verify resume point
 
 ## Phase 7: Hardening
 - [ ] Segment rolling by time (not just size)
-- [ ] CRC32 checksums on messages — verify on read
+- [x] CRC32 checksums on messages — verify on read
 - [ ] Index rebuild from log if index is missing or corrupt
-- [ ] Structured logging
+- [x] Structured logging
 - [ ] Basic metrics — messages/sec, consumer lag
 - [ ] Stress test — concurrent producers and consumers, no messages lost or duplicated
 

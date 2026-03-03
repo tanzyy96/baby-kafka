@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"hash/crc32"
 	"time"
 )
 
@@ -11,12 +12,14 @@ type Message struct {
 	Key       []byte
 	Value     []byte
 	CreatedAt time.Time
+	Checksum  uint32
 }
 
 func NewMessage(key, value []byte) *Message {
 	return &Message{
 		Key:       key,
 		Value:     value,
+		Checksum:  crc32.ChecksumIEEE(append(key, value...)),
 		CreatedAt: time.Now(),
 	}
 }
@@ -27,6 +30,9 @@ func DeserializeMessage(data []byte) (*Message, error) {
 	dec := gob.NewDecoder(b)
 	if err := dec.Decode(&msg); err != nil {
 		return nil, fmt.Errorf("failed to deserialize message: %w", err)
+	}
+	if valid := msg.ValidateChecksum(); !valid {
+		return nil, fmt.Errorf("invalid checksum for message")
 	}
 	return &msg, nil
 }
@@ -49,4 +55,13 @@ func (m *Message) SerializedLength() int64 {
 		return 0
 	}
 	return int64(len(serialized) + 8) // 8 bytes for the length prefix
+}
+
+// We calculate the checksum of the message using checksumFn(key+value)
+func (m *Message) ChecksumValue() uint32 {
+	return crc32.ChecksumIEEE(append(m.Key, m.Value...))
+}
+
+func (m *Message) ValidateChecksum() bool {
+	return m.Checksum == m.ChecksumValue()
 }
