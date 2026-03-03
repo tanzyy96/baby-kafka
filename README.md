@@ -1,12 +1,12 @@
 # baby-kafka
 
-A from-scratch implementation of core Apache Kafka concepts in Go — built as a practical alternative to interview prep grinding, and as a way to genuinely understand a commonly used technology in distributed systems.
+A from-scratch implementation of core Apache Kafka concepts in Go — mainly to understand its internals. Written mostly by hand / with Copilot, with Claude doing code reviews, guidance and writing tests.
 
 ## Motivation
 
 Kafka seems to be a rather popular technology used in large companies tackling scalable systems.
 
-Rather than reading another blog post or grinding through more algorithm problems, I decided to build a simplified version from scratch. It's a more engaging way to study a system I'd been encountering in interview prep, and it gave me a chance to revisit Go and work on something I rarely touch in typical web development: low-level binary encoding and a custom TCP wire protocol.
+So instead of just reading stuff about it and then going back to Leetcode, I decided to try implementing it to get my hands dirty whilst practicing some Go fundamentals. Alas its not perfect code but if I wanted perfect, clean code I'd have just asked Claude Code to reproduce Kafka on its own. The main purpose of this is for me to try building stuff for education.
 
 ## What's Implemented
 
