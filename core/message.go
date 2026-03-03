@@ -16,10 +16,12 @@ type Message struct {
 }
 
 func NewMessage(key, value []byte) *Message {
+	v := []byte(key)
+	v = append(v, value...)
 	return &Message{
 		Key:       key,
 		Value:     value,
-		Checksum:  crc32.ChecksumIEEE(append(key, value...)),
+		Checksum:  crc32.ChecksumIEEE(v),
 		CreatedAt: time.Now(),
 	}
 }
@@ -59,7 +61,9 @@ func (m *Message) SerializedLength() int64 {
 
 // We calculate the checksum of the message using checksumFn(key+value)
 func (m *Message) ChecksumValue() uint32 {
-	return crc32.ChecksumIEEE(append(m.Key, m.Value...))
+	v := []byte(m.Key)
+	v = append(v, m.Value...)
+	return crc32.ChecksumIEEE(v)
 }
 
 func (m *Message) ValidateChecksum() bool {
