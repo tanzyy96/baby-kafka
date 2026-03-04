@@ -111,18 +111,13 @@ func (t *Topic) nextPartition(key *string) (*Partition, error) {
 	}
 }
 
-func (t *Topic) Append(msg Message) (partitionIndex int32, offset int64, err error) {
-	var key *string
-	if len(msg.Key) > 0 {
-		str := string(msg.Key)
-		key = &str
-	}
-	partition, err := t.nextPartition(key)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to get next partition: %w", err)
+func (t *Topic) Append(partitionIndex int32, msg Message) (offset int64, err error) {
+	partition, exists := t.partitions[partitionIndex]
+	if !exists {
+		return 0, fmt.Errorf("partition index out of range: %d", partitionIndex)
 	}
 	offset, err = partition.Append(msg)
-	return partition.Index, offset, err
+	return offset, err
 }
 
 func (t *Topic) ReadAt(partitionIndex int32, offset int64) (*Message, error) {

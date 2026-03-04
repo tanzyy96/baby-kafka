@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"baby-kafka/core/proto"
@@ -29,11 +30,13 @@ const (
 	MessageTypeListTopics   = 4
 	MessageTypeFetchOffset  = 5
 	MessageTypeCommitOffset = 6
+	MessageTypeGetMetadata  = 7
 )
 
 type Server struct {
-	listener *net.Listener
-	broker   *Broker
+	listener   *net.Listener
+	broker     *Broker
+	numClients atomic.Int32
 }
 
 type Request struct{}
@@ -78,10 +81,13 @@ func (s *Server) Start(ctx context.Context) error {
 			}
 		}
 
-		log.Debugf("New connection from %s", conn.RemoteAddr())
 		wg.Add(1)
+		s.numClients.Add(1)
+
+		log.Infof("New connection from %s: total %d", conn.RemoteAddr(), s.numClients.Load())
 		go func() {
 			// Track active connections and wait for them to finish before shutting down the server
+			defer s.numClients.Add(-1)
 			defer wg.Done()
 			s.handleConnection(ctx, conn)
 		}()
@@ -125,6 +131,8 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 			resp, err = s.handleFetchOffset(payload)
 		case MessageTypeCommitOffset:
 			resp, err = s.handleCommitOffset(payload)
+		case MessageTypeGetMetadata:
+			resp, err = s.handleGetMetadata(payload)
 		default:
 			log.Warnf("Unknown message type received: %d", msgType)
 			err = fmt.Errorf("unknown message type: %d", msgType)

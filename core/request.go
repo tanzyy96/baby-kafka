@@ -10,14 +10,14 @@ import (
 
 // Request to create message in topic
 type ProduceRequest struct {
-	Key   []byte
-	Value []byte
-	Topic string
+	Key            []byte
+	Value          []byte
+	Topic          string
+	PartitionIndex int32
 }
 
 type ProduceResponse struct {
-	PartitionIndex int32
-	Offset         int64
+	Offset int64
 }
 
 // Request to consume message from topic and partition at a specific offset
@@ -60,6 +60,14 @@ type CommitOffsetRequest struct {
 	Offset         int64
 }
 
+type GetMetadataRequest struct {
+	Topic string
+}
+
+type GetMetadataResponse struct {
+	Metadata *TopicMetadata
+}
+
 // Producer looking to produce a message will send a frame with the following structure:
 func (s *Server) handleProduce(payload []byte) (resp []byte, respErr error) {
 	var (
@@ -72,14 +80,14 @@ func (s *Server) handleProduce(payload []byte) (resp []byte, respErr error) {
 		status = proto.StatusBadRequest
 	}
 
-	log.Debugf("Produce: topic=%s", req.Topic)
-	partitionIndex, offset, err := s.broker.Produce(req.Topic, *NewMessage(req.Key, req.Value))
+	log.Debugf("Produce: topic=%s partition=%d", req.Topic, req.PartitionIndex)
+	offset, err := s.broker.Produce(req.Topic, req.PartitionIndex, *NewMessage(req.Key, req.Value))
 	if err != nil && respErr == nil {
 		respErr = fmt.Errorf("failed to produce message: %w", err)
 		status = proto.StatusServerError
 	}
 
-	pResp := ProduceResponse{PartitionIndex: partitionIndex, Offset: offset}
+	pResp := ProduceResponse{Offset: offset}
 	data, encodeErr := proto.GobEncode(&pResp)
 	if encodeErr != nil && respErr == nil {
 		respErr = fmt.Errorf("failed to encode ProduceResponse: %w", encodeErr)
@@ -248,6 +256,41 @@ func (s *Server) handleCommitOffset(payload []byte) (resp []byte, err error) {
 	respBytes, encErr := proto.GobEncode(proto.Response{Status: status, Error: errMsg})
 	if encErr != nil {
 		return nil, fmt.Errorf("failed to encode commitOffset response: %w", encErr)
+	}
+	return respBytes, err
+}
+
+func (s *Server) handleGetMetadata(payload []byte) (resp []byte, err error) {
+	var (
+		req    GetMetadataRequest
+		status = proto.StatusOK
+	)
+
+	if decodeErr := proto.GobDecode(payload, &req); decodeErr != nil {
+		err = fmt.Errorf("failed to decode get metadata request: %v", decodeErr)
+	}
+
+	log.Debugf("GetMetadata: topic=%s", req.Topic)
+	metadata, getErr := s.broker.GetTopicMetadata(req.Topic)
+	if getErr != nil && err == nil {
+		err = fmt.Errorf("failed to get metadata: %v", getErr)
+	}
+
+	var errMsg string
+	if err != nil {
+		errMsg = err.Error()
+		status = proto.StatusServerError
+	}
+
+	data, encodeErr := proto.GobEncode(&GetMetadataResponse{Metadata: metadata})
+	if encodeErr != nil && errMsg == "" {
+		errMsg = encodeErr.Error()
+		status = proto.StatusServerError
+	}
+
+	respBytes, encErr := proto.GobEncode(proto.Response{Status: status, Error: errMsg, Data: data})
+	if encErr != nil {
+		return nil, fmt.Errorf("failed to encode getMetadata response: %w", encErr)
 	}
 	return respBytes, err
 }

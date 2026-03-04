@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	core "baby-kafka/core"
-	"baby-kafka/internal/utils"
 
 	"github.com/stretchr/testify/require"
 )
@@ -38,23 +37,21 @@ func TestTopicAppendAndReadWithKey(t *testing.T) {
 			topic := newTestTopic(t)
 
 			// Append the message to the log
-			_, _, err := topic.Append(tt.msg)
+			_, err := topic.Append(0, tt.msg)
 			require.NoError(t, err)
 		})
 	}
 
 	for _, tt := range tests {
 		t.Run("Read "+tt.name, func(t *testing.T) {
-			targetPartition := utils.PartitionFor(string(tt.msg.Key), 2)
 			topic := newTestTopic(t)
 
 			// Append the message to the log
-			partitionIndex, offset, err := topic.Append(tt.msg)
+			offset, err := topic.Append(0, tt.msg)
 			require.NoError(t, err)
-			require.Equal(t, int32(targetPartition), partitionIndex)
 
 			// Read the message back
-			readMsg, err := topic.ReadAt(int32(targetPartition), offset)
+			readMsg, err := topic.ReadAt(0, offset)
 			require.NoError(t, err)
 			require.Equal(t, tt.msg.Key, readMsg.Key)
 			require.Equal(t, tt.msg.Value, readMsg.Value)
@@ -72,10 +69,10 @@ func TestTopicAppendAndReadWithoutKey(t *testing.T) {
 	}
 
 	for _, msg := range messages {
-		partitionIndex, offset, err := topic.Append(msg)
+		offset, err := topic.Append(0, msg)
 		require.NoError(t, err)
 
-		readMsg, err := topic.ReadAt(partitionIndex, offset)
+		readMsg, err := topic.ReadAt(0, offset)
 		require.NoError(t, err)
 		require.Equal(t, []byte(nil), readMsg.Key) // this is the decoded empty key
 		require.Equal(t, msg.Value, readMsg.Value)

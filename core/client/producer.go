@@ -7,6 +7,7 @@ import (
 
 	"baby-kafka/core"
 	"baby-kafka/core/proto"
+	"baby-kafka/internal/utils"
 
 	"github.com/charmbracelet/log"
 )
@@ -14,6 +15,10 @@ import (
 type Producer struct {
 	conn net.Conn
 	w    *bufio.Writer // We use a buffered writer to batch writes and improve performance
+
+	// Metadata is able to store metadata for different topics
+	// If the topic is not found, we will load metadata for that topic
+	metadata map[string]*core.TopicMetadata
 }
 
 func NewProducer(addr string) (*Producer, error) {
@@ -22,16 +27,65 @@ func NewProducer(addr string) (*Producer, error) {
 		return nil, err
 	}
 	return &Producer{
-		conn: conn,
-		w:    bufio.NewWriter(conn),
+		conn:     conn,
+		w:        bufio.NewWriter(conn),
+		metadata: make(map[string]*core.TopicMetadata),
 	}, nil
 }
 
-func (p *Producer) Send(topic string, key, value []byte) (*core.ProduceResponse, error) {
-	payload := core.ProduceRequest{
-		Key:   key,
-		Value: value,
+func (c *Producer) LoadTopicMetadata(topic string) (*core.TopicMetadata, error) {
+	payload := core.GetMetadataRequest{
 		Topic: topic,
+	}
+
+	if err := writeRequest(c.w, core.MessageTypeGetMetadata, payload); err != nil {
+		return nil, fmt.Errorf("failed to write getTopicMetadata request: %w", err)
+	}
+
+	if err := c.w.Flush(); err != nil {
+		return nil, fmt.Errorf("failed to flush consume request: %w", err)
+	}
+
+	var (
+		mResp core.GetMetadataResponse
+		resp  proto.Response
+	)
+	if err := readResponse(c.conn, &resp); err != nil {
+		return nil, fmt.Errorf("failed to read consume response: %w", err)
+	}
+
+	if resp.Status != proto.StatusOK {
+		// Manual check
+		return nil, fmt.Errorf("consume request failed: %s", resp.Error)
+	}
+
+	if err := resp.DecodeData(&mResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response.Data: %w", err)
+	}
+
+	// set metadata and partition index
+	c.metadata[topic] = mResp.Metadata
+	log.Info("Loaded topic metadata", "topic", topic)
+
+	return mResp.Metadata, nil
+}
+
+func (p *Producer) Send(topic string, key, value []byte) (*core.ProduceResponse, error) {
+	topicData, ok := p.metadata[topic]
+	if !ok {
+		var err error
+		topicData, err = p.LoadTopicMetadata(topic)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load topic metadata: %w", err)
+		}
+	}
+
+	partition := utils.PartitionFor(string(key), uint32(topicData.NumPartitions))
+	payload := core.ProduceRequest{
+		Key:            key,
+		Value:          value,
+		Topic:          topic,
+		PartitionIndex: int32(partition),
 	}
 
 	if err := writeRequest(p.w, core.MessageTypeProduce, payload); err != nil {
@@ -59,7 +113,7 @@ func (p *Producer) Send(topic string, key, value []byte) (*core.ProduceResponse,
 		return nil, fmt.Errorf("failed to decode response.Data: %w", err)
 	}
 
-	log.Info("Sent message", "key", string(key), "value", string(value), "resp", prodResp)
+	log.Info("Sent message", "key", string(key), "partition", partition, "value", string(value), "resp", prodResp)
 
 	return &prodResp, nil
 }

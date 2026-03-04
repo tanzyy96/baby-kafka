@@ -15,27 +15,28 @@ import (
 func main() {
 	cfg := core.LoadConfig()
 
-	count := flag.Int("count", 1, "number of consumers")
+	numProducers := flag.Int("producers", 1, "number of producers")
 	topic := flag.String("topic", "test", "topic")
 	key := flag.String("key", "key", "key for message")
+	count := flag.Int("count", 1, "number of messages to send")
 
 	flag.Parse()
 
 	wg := sync.WaitGroup{}
 
-	for i := 0; i < *count; i++ {
+	for i := 0; i < *numProducers; i++ {
 		wg.Add(1)
 
 		go func(id int) {
 			defer wg.Done()
-			runProducer(id, cfg.ServerPort, *topic, *key)
+			runProducer(id, cfg.ServerPort, *topic, *key, *count)
 		}(i)
 	}
 
 	wg.Wait()
 }
 
-func runProducer(id int, addr, topic, key string) {
+func runProducer(id int, addr, topic, key string, numMessages int) {
 	p, err := client.NewProducer(addr)
 	if err != nil {
 		log.Fatalf("Failed to create producer %d: %s", id, err)
@@ -43,7 +44,11 @@ func runProducer(id int, addr, topic, key string) {
 
 	hr, min, sec := time.Now().Clock()
 	value := fmt.Sprintf("Sent by producer %d at %d:%d:%d", id, hr, min, sec)
-	if _, err := p.Send(topic, []byte(key), []byte(value)); err != nil {
-		log.Fatal("Failed to send message:", err)
+
+	for i := 0; i < numMessages; i++ {
+		if _, err := p.Send(topic, []byte(key), []byte(value)); err != nil {
+			log.Fatal("Failed to send message:", err)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

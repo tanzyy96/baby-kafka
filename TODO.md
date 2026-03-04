@@ -64,6 +64,9 @@
 - [ ] Basic metrics — messages/sec, consumer lag
 - [ ] Stress test — concurrent producers and consumers, no messages lost or duplicated
 
+## Phase 7.9 Cleanup
+- [ ] Refactor partition logic to producer-side instead of broker side
+
 ## Phase 8: Replication
 - [ ] Each partition has a leader and N followers
 - [ ] Followers replicate by fetching from leader

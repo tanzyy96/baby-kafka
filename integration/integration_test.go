@@ -47,7 +47,6 @@ func TestIntegration_ProduceAndConsume(t *testing.T) {
 
 	resp, err := producer.Send("test-topic", []byte("key1"), []byte("value1"))
 	require.NoError(t, err)
-	assert.Equal(t, int32(0), resp.PartitionIndex)
 	assert.Equal(t, int64(0), resp.Offset)
 
 	consumer, err := client.NewConsumer(addr, "group1", "test-topic", 0, 0)
@@ -91,33 +90,6 @@ func TestIntegration_MultipleMessages_InOrder(t *testing.T) {
 		assert.Equal(t, []byte(fmt.Sprintf("key%d", i)), key)
 		assert.Equal(t, []byte(fmt.Sprintf("msg%d", i)), value)
 		assert.Equal(t, int64(i), atOffset)
-	}
-}
-
-func TestIntegration_KeyedPartitionRouting(t *testing.T) {
-	addr := startServer(t, t.TempDir())
-
-	admin, err := client.NewAdmin(addr)
-	require.NoError(t, err)
-	defer admin.Close()
-
-	_, err = admin.CreateTopic("keyed-topic", 3)
-	require.NoError(t, err)
-
-	producer, err := client.NewProducer(addr)
-	require.NoError(t, err)
-	defer producer.Close()
-
-	const n = 10
-	var firstPartition int32 = -1
-	for i := 0; i < n; i++ {
-		resp, err := producer.Send("keyed-topic", []byte("stable-key"), []byte("value"))
-		require.NoError(t, err)
-		if firstPartition == -1 {
-			firstPartition = resp.PartitionIndex
-		} else {
-			assert.Equal(t, firstPartition, resp.PartitionIndex, "same key should always route to the same partition")
-		}
 	}
 }
 

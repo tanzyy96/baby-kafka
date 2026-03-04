@@ -131,7 +131,7 @@ func (om *OffsetManager) persistToLog(groupId string, topicId string, partitionI
 	if err != nil {
 		return err
 	}
-	if _, _, err = om.offsetTopic.Append(*NewMessage(kb, kv)); err != nil {
+	if _, err = om.offsetTopic.Append(partitionId, *NewMessage(kb, kv)); err != nil {
 		return err
 	}
 

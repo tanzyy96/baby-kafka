@@ -23,6 +23,8 @@ type BrokerInterface interface {
 	// For offsets
 	FetchOffset(groupId, topic string, partitionIndex int32) (int64, error)
 	CommitOffset(groupId, topic string, partitionIndex int32, newOffset int64) error
+
+	GetTopicMetadata(topicName string) (*TopicMetadata, error)
 }
 
 type Broker struct {
@@ -30,6 +32,26 @@ type Broker struct {
 	basePath      string
 	rolloverLimit int64
 	offsetManager *OffsetManager
+}
+
+type TopicMetadata struct {
+	Topic         string
+	NumPartitions int32
+
+	// TODO: Replication stuff, add PartitionMetadata
+	// partitionMetadata []PartitionMetadata
+}
+
+type PartitionMetadata struct {
+	PartitionIndex int32
+	/*
+		Index of the leader broker for given partition
+	*/
+	Leader int32
+	/*
+		Address of the leader broker for given partition
+	*/
+	LeaderAddr string
 }
 
 func NewBroker(basePath string, rolloverLimit int64) (*Broker, error) {
@@ -107,12 +129,12 @@ func (b *Broker) ListTopics() []string {
 	return keys
 }
 
-func (b *Broker) Produce(topicName string, msg Message) (int32, int64, error) {
+func (b *Broker) Produce(topicName string, partitionIndex int32, msg Message) (int64, error) {
 	topic, err := b.GetTopic(topicName)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to produce message: %w", err)
+		return 0, fmt.Errorf("failed to produce message: %w", err)
 	}
-	return topic.Append(msg)
+	return topic.Append(partitionIndex, msg)
 }
 
 func (b *Broker) Consume(topicName string, partitionIndex int32, offset int64) (*Message, error) {
@@ -131,4 +153,15 @@ func (b *Broker) FetchOffset(groupId, topic string, partitionIndex int32) (int64
 func (b *Broker) CommitOffset(groupId, topic string, partitionIndex int32, newOffset int64) error {
 	b.offsetManager.CommitOffset(groupId, topic, partitionIndex, newOffset)
 	return nil
+}
+
+func (b *Broker) GetTopicMetadata(topicName string) (*TopicMetadata, error) {
+	topic, err := b.GetTopic(topicName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get topic metadata: %w", err)
+	}
+	return &TopicMetadata{
+		Topic:         topicName,
+		NumPartitions: topic.numPartitions,
+	}, nil
 }
