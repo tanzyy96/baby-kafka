@@ -37,13 +37,20 @@ func main() {
 	flag.Var(create, "create", "Create a topic with the given name")
 	numPartitions := flag.Int("num", 1, "numPartitions")
 
+	// TODO: I think this is supposed to actually propagate throughout all the brokers
+	index := flag.Int("index", 0, "index of target broker")
+
 	flag.Parse()
+
+	if *index < 0 || *index >= len(cfg.Brokers) {
+		log.Fatalf("Invalid index: %d", *index)
+	}
 
 	if *list {
 		log.Printf("Listing topic...")
-		adminListTopics(cfg.ServerPort)
+		adminListTopics(cfg.Brokers[*index].Port)
 	} else if create.IsSet {
-		adminCreateTopic(cfg.ServerPort, create.Topic, *numPartitions)
+		adminCreateTopic(cfg.Brokers[*index].Port, create.Topic, *numPartitions)
 	} else {
 		log.Printf("No command provided. Use --create to create a topic or --list to list topics.")
 	}
