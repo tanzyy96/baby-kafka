@@ -34,16 +34,23 @@ const (
 )
 
 type Server struct {
-	listener   *net.Listener
-	broker     *Broker
-	numClients atomic.Int32
+	listener      *net.Listener
+	broker        *Broker
+	numClients    atomic.Int32
+	brokerConfigs []BrokerConfig
 }
 
 type Request struct{}
 
-// func NewServer(port string, rolloverLimit int64, datadir string) (*Server, error) {
-func NewServer(cfg *Config) (*Server, error) {
-	n, err := net.Listen("tcp", string(cfg.ServerPort))
+// TODO: add a Cluster struct to help spin up multiple servers
+// HAHA that sounds like docker-compose to Dockerfile
+func NewServer(cfg *Config, brokerIndex int32) (*Server, error) {
+	if brokerIndex < 0 || brokerIndex >= int32(len(cfg.Brokers)) {
+		return nil, fmt.Errorf("invalid broker index: %d", brokerIndex)
+	}
+	brokerConfig := cfg.Brokers[brokerIndex]
+
+	n, err := net.Listen("tcp", string(brokerConfig.Port))
 	if err != nil {
 		return nil, fmt.Errorf("failed to start network listener: %w", err)
 	}
@@ -52,13 +59,15 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to create broker: %w", err)
 	}
 	return &Server{
-		listener: &n,
-		broker:   b,
+		listener:      &n,
+		broker:        b,
+		brokerConfigs: cfg.Brokers,
 	}, nil
 }
 
 func (s *Server) Start(ctx context.Context) error {
-	log.Info("Network manager started, listening for connections...")
+	log.Info("Server started on ", s.Addr(), ", listening for connections...")
+	log.Info("Expecting ", len(s.brokerConfigs)-1, " other brokers in cluster")
 
 	wg := sync.WaitGroup{}
 

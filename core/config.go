@@ -12,16 +12,26 @@ const (
 )
 
 type Config struct {
-	BasePath      string `json:"base_path"`
-	RolloverLimit int64  `json:"rollover_limit"`
-	ServerPort    string `json:"server_port"`
+	BasePath      string         `json:"base_path"`
+	RolloverLimit int64          `json:"rollover_limit"`
+	Brokers       []BrokerConfig `json:"brokers"`
+}
+
+// This contains information on the other brokers/servers in the cluster
+type BrokerConfig struct {
+	Index int32  `json:"index"`
+	Port  string `json:"port"`
 }
 
 func DefaultConfig() *Config {
 	return &Config{
 		BasePath:      "./data",
 		RolloverLimit: 1024 * 1024, // 1MB
-		ServerPort:    ":8080",
+		Brokers: []BrokerConfig{
+			{Index: 0, Port: ":8080"},
+			{Index: 1, Port: ":8081"},
+			{Index: 2, Port: ":8082"},
+		},
 	}
 }
 
@@ -52,6 +62,7 @@ func generateDefaultConfigFile() {
 
 	if err := os.WriteFile(ConfigPath, b, 0o644); err != nil {
 		log.Warn("Failed to write default config file:", err)
+		return
 	}
 	log.Infof("Generated default config file at %s", ConfigPath)
 }

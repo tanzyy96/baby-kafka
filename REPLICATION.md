@@ -4,7 +4,7 @@
 The objective is to ensure different components have distributed knowledge of partition leadership.
 
 1. Brokers need to know each other and their addresses
-    - [ ] Config-based discovery: each broker config includes its own ID/address and a peers list
+    - [x] Config-based discovery: each broker config includes its own ID/address and a peers list
 2. Brokers need to know the topics they are leading
     - [ ] Assignment on CreateTopic: round-robin across known brokers, respects replicationFactor
     - [ ] Validation: replicationFactor <= number of known brokers, else error

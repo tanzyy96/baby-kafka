@@ -13,6 +13,7 @@ import (
 
 func main() {
 	debug := flag.Bool("debug", false, "enable debug logs")
+	index := flag.Int("index", 0, "broker index")
 
 	flag.Parse()
 
@@ -21,7 +22,7 @@ func main() {
 	}
 
 	cfg := core.LoadConfig()
-	srv, err := core.NewServer(cfg)
+	srv, err := core.NewServer(cfg, int32(*index))
 	if err != nil {
 		panic(err)
 	}
