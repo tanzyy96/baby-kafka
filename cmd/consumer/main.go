@@ -33,7 +33,7 @@ func main() {
 		wg.Add(1)
 
 		go func(id int) {
-			if *index >= len(cfg.Brokers) {
+			if *index < 0 || *index >= len(cfg.Brokers) {
 				log.Fatalf("Invalid index %d for broker address list", *index)
 			}
 			port := cfg.Brokers[*index].Port

@@ -24,6 +24,7 @@ def load(json_file):
 
 def render(data):
     issues = data.get("issues", [])
+# TODO: Replace `data["summary"]` with `data.get("summary", "")` to avoid KeyError on missing field
     lines = ["## Code Review", "", f'_{data["summary"]}_', ""]
     if not issues:
         lines.append("No issues found.")
@@ -36,6 +37,7 @@ def render(data):
 
 
 def insert(data):
+# TODO: Validate that `issue['file']` resolves to a path inside the project root before opening it (e.g., `os.path.realpath(filepath).startswith(os.path.realpath('.'))`)
     by_file = defaultdict(list)
     for issue in data.get("issues", []):
         by_file[issue["file"]].append(issue)
@@ -50,7 +52,7 @@ def insert(data):
         prefix = "//" if ext in (".go", ".js", ".ts", ".c", ".cpp", ".java") else "#"
         # Insert in reverse order so earlier insertions don't shift subsequent line numbers
         for item in sorted(items, key=lambda x: x["chunk_start_line"], reverse=True):
-            linenum = int(item["chunk_start_line"])
+            linenum = max(1, int(item["chunk_start_line"]))
             lines.insert(linenum - 1, f"{prefix} TODO: {item['todo_comment']}\n")
             print(f"  {filepath}:{linenum}: {item['todo_comment']}")
         with open(filepath, "w") as f:
