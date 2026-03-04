@@ -68,229 +68,105 @@ type GetMetadataResponse struct {
 	Metadata *TopicMetadata
 }
 
-// Producer looking to produce a message will send a frame with the following structure:
-func (s *Server) handleProduce(payload []byte) (resp []byte, respErr error) {
-	var (
-		req    ProduceRequest
-		status = proto.StatusOK
-	)
-
+// handleRequest decodes Req from payload, calls fn, encodes the Resp, and wraps it in a proto.Response frame.
+func handleRequest[Req any, Resp any](payload []byte, fn func(Req) (Resp, error)) ([]byte, error) {
+	var req Req
 	if err := proto.GobDecode(payload, &req); err != nil {
-		respErr = fmt.Errorf("failed to decode produce request: %w", err)
-		status = proto.StatusBadRequest
+		return buildResponse(proto.StatusServerError, err)
 	}
-
-	log.Debugf("Produce: topic=%s partition=%d", req.Topic, req.PartitionIndex)
-	offset, err := s.broker.Produce(req.Topic, req.PartitionIndex, *NewMessage(req.Key, req.Value))
-	if err != nil && respErr == nil {
-		respErr = fmt.Errorf("failed to produce message: %w", err)
-		status = proto.StatusServerError
-	}
-
-	pResp := ProduceResponse{Offset: offset}
-	data, encodeErr := proto.GobEncode(&pResp)
-	if encodeErr != nil && respErr == nil {
-		respErr = fmt.Errorf("failed to encode ProduceResponse: %w", encodeErr)
-		status = proto.StatusServerError
-	}
-
-	errMsg := ""
-	if respErr != nil {
-		errMsg = respErr.Error()
-	}
-
-	respBytes, encErr := proto.GobEncode(proto.Response{Status: status, Error: errMsg, Data: data})
-	if encErr != nil {
-		return nil, fmt.Errorf("failed to encode produce response: %w", encErr)
-	}
-	return respBytes, respErr
-}
-
-// Consumer looking to read message from a particular topic + partition + offset
-func (s *Server) handleConsume(payload []byte) (resp []byte, respErr error) {
-	var (
-		req    ConsumeRequest
-		status = proto.StatusOK
-	)
-
-	if err := proto.GobDecode(payload, &req); err != nil {
-		respErr = fmt.Errorf("failed to decode consume request: %w", err)
-		status = proto.StatusBadRequest
-	}
-
-	log.Debugf("Consume: group=%s topic=%s partition=%d offset=%d", req.GroupId, req.Topic, req.PartitionIndex, req.Offset)
-	cResp := ConsumeResponse{}
-	msg, err := s.broker.Consume(req.Topic, req.PartitionIndex, req.Offset)
-	if err != nil && respErr == nil {
-		respErr = fmt.Errorf("failed to consume message: %w", err)
-		status = proto.StatusServerError
-	} else {
-		cResp.Message = *msg
-	}
-
-	data, encodeErr := proto.GobEncode(&cResp)
-	if encodeErr != nil && respErr == nil {
-		respErr = fmt.Errorf("failed to encode ConsumeResponse: %w", encodeErr)
-		status = proto.StatusServerError
-	}
-
-	errMsg := ""
-	if respErr != nil {
-		errMsg = respErr.Error()
-	}
-
-	respBytes, encErr := proto.GobEncode(proto.Response{Status: status, Error: errMsg, Data: data})
-	if encErr != nil {
-		return nil, fmt.Errorf("failed to encode consume response: %w", encErr)
-	}
-	return respBytes, respErr
-}
-
-func (s *Server) handleCreateTopic(payload []byte) (resp []byte, err error) {
-	var (
-		req    CreateTopicRequest
-		status = proto.StatusOK
-	)
-
-	if decodeErr := proto.GobDecode(payload, &req); decodeErr != nil {
-		err = fmt.Errorf("failed to decode create topic request: %v", decodeErr)
-	}
-
-	log.Debugf("CreateTopic: topic=%s numPartitions=%d", req.Topic, req.NumPartitions)
-	if createErr := s.broker.CreateTopic(req.Topic, req.NumPartitions); createErr != nil && err == nil {
-		err = fmt.Errorf("failed to create topic: %v", createErr)
-	}
-
-	var errMsg string
+	resp, err := fn(req)
 	if err != nil {
-		errMsg = err.Error()
-		status = proto.StatusServerError
+		return buildResponse(proto.StatusServerError, err)
 	}
 
-	respBytes, encErr := proto.GobEncode(proto.Response{Status: status, Error: errMsg})
-	if encErr != nil {
-		return nil, fmt.Errorf("failed to encode createTopic response: %w", encErr)
+	data, err := proto.GobEncode(&resp)
+	if err != nil {
+		return buildResponse(proto.StatusServerError, fmt.Errorf("failed to encode response: %w", err))
 	}
-	return respBytes, err
+	return buildResponseStatusOK(data)
 }
 
-func (s *Server) handleListTopics() (resp []byte, err error) {
-	status := proto.StatusOK
-	errMsg := ""
+// handleVoidRequest is like handleRequest but for handlers with no response body.
+func handleVoidRequest[Req any](payload []byte, fn func(Req) error) ([]byte, error) {
+	var req Req
+	if err := proto.GobDecode(payload, &req); err != nil {
+		return buildResponse(proto.StatusServerError, err)
+	}
+	if err := fn(req); err != nil {
+		return buildResponse(proto.StatusServerError, err)
+	}
+	return buildResponseStatusOK(nil)
+}
 
+// Returns encoded proto.Response with provided status and error message
+func buildResponse(status proto.Status, err error) ([]byte, error) {
+	b, _ := proto.GobEncode(proto.Response{Status: status, Error: err.Error()})
+	return b, err
+}
+
+// Returns encoded proto.Response with StatusOK and provided data
+func buildResponseStatusOK(data []byte) ([]byte, error) {
+	b, err := proto.GobEncode(proto.Response{Status: proto.StatusOK, Data: data})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode response: %w", err)
+	}
+	return b, nil
+}
+
+func (s *Server) handleProduce(payload []byte) ([]byte, error) {
+	return handleRequest(payload, func(req ProduceRequest) (ProduceResponse, error) {
+		log.Debugf("Produce: topic=%s partition=%d", req.Topic, req.PartitionIndex)
+		offset, err := s.broker.Produce(req.Topic, req.PartitionIndex, *NewMessage(req.Key, req.Value))
+		return ProduceResponse{Offset: offset}, err
+	})
+}
+
+func (s *Server) handleConsume(payload []byte) ([]byte, error) {
+	return handleRequest(payload, func(req ConsumeRequest) (ConsumeResponse, error) {
+		log.Debugf("Consume: group=%s topic=%s partition=%d offset=%d", req.GroupId, req.Topic, req.PartitionIndex, req.Offset)
+		msg, err := s.broker.Consume(req.Topic, req.PartitionIndex, req.Offset)
+		if err != nil {
+			return ConsumeResponse{}, err
+		}
+		return ConsumeResponse{Message: *msg}, nil
+	})
+}
+
+func (s *Server) handleCreateTopic(payload []byte) ([]byte, error) {
+	return handleVoidRequest(payload, func(req CreateTopicRequest) error {
+		log.Debugf("CreateTopic: topic=%s numPartitions=%d", req.Topic, req.NumPartitions)
+		return s.broker.CreateTopic(req.Topic, req.NumPartitions)
+	})
+}
+
+func (s *Server) handleListTopics() ([]byte, error) {
 	topics := s.broker.ListTopics()
-	data, encodeErr := proto.GobEncode(&ListTopicsResponse{Topics: topics})
-	if encodeErr != nil {
-		log.Errorf("failed to encode topicsResp: %s", encodeErr.Error())
-		status = proto.StatusServerError
-		errMsg = encodeErr.Error()
+	data, err := proto.GobEncode(&ListTopicsResponse{Topics: topics})
+	if err != nil {
+		return buildResponse(proto.StatusServerError, err)
 	}
-
-	respBytes, encErr := proto.GobEncode(proto.Response{Status: status, Error: errMsg, Data: data})
-	if encErr != nil {
-		return nil, fmt.Errorf("failed to encode listTopics response: %w", encErr)
-	}
-	return respBytes, nil
+	return buildResponseStatusOK(data)
 }
 
-func (s *Server) handleFetchOffset(payload []byte) (resp []byte, err error) {
-	var (
-		req    FetchOffsetRequest
-		status = proto.StatusOK
-	)
-
-	if decodeErr := proto.GobDecode(payload, &req); decodeErr != nil {
-		err = fmt.Errorf("failed to decode fetch offset request: %v", decodeErr)
-	}
-
-	log.Debugf("FetchOffset: group=%s topic=%s partition=%d", req.GroupId, req.Topic, req.PartitionIndex)
-	offset, fetchErr := s.broker.FetchOffset(req.GroupId, req.Topic, req.PartitionIndex)
-	if fetchErr != nil && err == nil {
-		err = fmt.Errorf("failed to fetch offset: %v", fetchErr)
-	}
-
-	var errMsg string
-	foResp := FetchOffsetResponse{}
-	if err != nil {
-		log.Warnf("handleFetchOffset error: %s", err.Error())
-		errMsg = err.Error()
-		status = proto.StatusServerError
-	} else {
-		foResp.Offset = offset
-	}
-
-	data, encodeErr := proto.GobEncode(&foResp)
-	if encodeErr != nil && errMsg == "" {
-		errMsg = encodeErr.Error()
-		status = proto.StatusServerError
-	}
-
-	respBytes, encErr := proto.GobEncode(proto.Response{Status: status, Error: errMsg, Data: data})
-	if encErr != nil {
-		return nil, fmt.Errorf("failed to encode fetchOffset response: %w", encErr)
-	}
-	return respBytes, err
+func (s *Server) handleFetchOffset(payload []byte) ([]byte, error) {
+	return handleRequest(payload, func(req FetchOffsetRequest) (FetchOffsetResponse, error) {
+		log.Debugf("FetchOffset: group=%s topic=%s partition=%d", req.GroupId, req.Topic, req.PartitionIndex)
+		offset, err := s.broker.FetchOffset(req.GroupId, req.Topic, req.PartitionIndex)
+		return FetchOffsetResponse{Offset: offset}, err
+	})
 }
 
-func (s *Server) handleCommitOffset(payload []byte) (resp []byte, err error) {
-	var (
-		req    CommitOffsetRequest
-		status = proto.StatusOK
-	)
-
-	if decodeErr := proto.GobDecode(payload, &req); decodeErr != nil {
-		err = fmt.Errorf("failed to decode commit offset request: %v", decodeErr)
-	}
-
-	log.Debugf("CommitOffset: group=%s topic=%s partition=%d offset=%d", req.GroupId, req.Topic, req.PartitionIndex, req.Offset)
-	if commitErr := s.broker.CommitOffset(req.GroupId, req.Topic, req.PartitionIndex, req.Offset); commitErr != nil && err == nil {
-		err = fmt.Errorf("failed to commit offset: %v", commitErr)
-	}
-
-	var errMsg string
-	if err != nil {
-		errMsg = err.Error()
-		status = proto.StatusServerError
-	}
-
-	respBytes, encErr := proto.GobEncode(proto.Response{Status: status, Error: errMsg})
-	if encErr != nil {
-		return nil, fmt.Errorf("failed to encode commitOffset response: %w", encErr)
-	}
-	return respBytes, err
+func (s *Server) handleCommitOffset(payload []byte) ([]byte, error) {
+	return handleVoidRequest(payload, func(req CommitOffsetRequest) error {
+		log.Debugf("CommitOffset: group=%s topic=%s partition=%d offset=%d", req.GroupId, req.Topic, req.PartitionIndex, req.Offset)
+		return s.broker.CommitOffset(req.GroupId, req.Topic, req.PartitionIndex, req.Offset)
+	})
 }
 
-func (s *Server) handleGetMetadata(payload []byte) (resp []byte, err error) {
-	var (
-		req    GetMetadataRequest
-		status = proto.StatusOK
-	)
-
-	if decodeErr := proto.GobDecode(payload, &req); decodeErr != nil {
-		err = fmt.Errorf("failed to decode get metadata request: %v", decodeErr)
-	}
-
-	log.Debugf("GetMetadata: topic=%s", req.Topic)
-	metadata, getErr := s.broker.GetTopicMetadata(req.Topic)
-	if getErr != nil && err == nil {
-		err = fmt.Errorf("failed to get metadata: %v", getErr)
-	}
-
-	var errMsg string
-	if err != nil {
-		errMsg = err.Error()
-		status = proto.StatusServerError
-	}
-
-	data, encodeErr := proto.GobEncode(&GetMetadataResponse{Metadata: metadata})
-	if encodeErr != nil && errMsg == "" {
-		errMsg = encodeErr.Error()
-		status = proto.StatusServerError
-	}
-
-	respBytes, encErr := proto.GobEncode(proto.Response{Status: status, Error: errMsg, Data: data})
-	if encErr != nil {
-		return nil, fmt.Errorf("failed to encode getMetadata response: %w", encErr)
-	}
-	return respBytes, err
+func (s *Server) handleGetMetadata(payload []byte) ([]byte, error) {
+	return handleRequest(payload, func(req GetMetadataRequest) (GetMetadataResponse, error) {
+		log.Debugf("GetMetadata: topic=%s", req.Topic)
+		metadata, err := s.broker.GetTopicMetadata(req.Topic)
+		return GetMetadataResponse{Metadata: metadata}, err
+	})
 }
