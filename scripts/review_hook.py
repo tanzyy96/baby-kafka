@@ -53,7 +53,10 @@ def insert(data):
         # Insert in reverse order so earlier insertions don't shift subsequent line numbers
         for item in sorted(items, key=lambda x: x["chunk_start_line"], reverse=True):
             linenum = max(1, int(item["chunk_start_line"]))
-            lines.insert(linenum - 1, f"{prefix} TODO: {item['todo_comment']}\n")
+            target_line = lines[linenum - 1] if linenum - 1 < len(lines) else ""
+            indent = len(target_line) - len(target_line.lstrip())
+            indentation = target_line[:indent]
+            lines.insert(linenum - 1, f"{indentation}{prefix} TODO: {item['todo_comment']}\n")
             print(f"  {filepath}:{linenum}: {item['todo_comment']}")
         with open(filepath, "w") as f:
             f.writelines(lines)
