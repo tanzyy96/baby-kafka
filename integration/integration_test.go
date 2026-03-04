@@ -19,9 +19,9 @@ func startServer(t *testing.T, dir string) string {
 	t.Helper()
 	cfg := core.DefaultConfig()
 	cfg.BasePath = dir
-	cfg.ServerPort = ":0"
+	cfg.Brokers = []core.BrokerConfig{{Index: 0, Port: ":0"}}
 
-	s, err := core.NewServer(cfg)
+	s, err := core.NewServer(cfg, 0)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -138,9 +138,9 @@ func TestIntegration_BrokerRestart(t *testing.T) {
 	// --- Server A ---
 	cfgA := core.DefaultConfig()
 	cfgA.BasePath = dir
-	cfgA.ServerPort = ":0"
+	cfgA.Brokers = []core.BrokerConfig{{Index: 0, Port: ":0"}}
 
-	sA, err := core.NewServer(cfgA)
+	sA, err := core.NewServer(cfgA, 0)
 	require.NoError(t, err)
 
 	ctxA, cancelA := context.WithCancel(context.Background())

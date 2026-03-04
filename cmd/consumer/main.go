@@ -20,6 +20,11 @@ func main() {
 	partition := flag.Int("partition", 0, "partition")
 	groupId := flag.String("group", "testGroup", "consumer group id")
 
+	// TODO: consumer should precalculate the broker address based GetTopicMetadata + topic + partition
+	// Consumers only target one leader partition, so it needs to figure that out
+	// For now we hardcode the index
+	index := flag.Int("index", 0, "index of target broker")
+
 	flag.Parse()
 
 	wg := sync.WaitGroup{}
@@ -28,8 +33,13 @@ func main() {
 		wg.Add(1)
 
 		go func(id int) {
+			if *index >= len(cfg.Brokers) {
+				log.Fatalf("Invalid index %d for broker address list", *index)
+			}
+			port := cfg.Brokers[*index].Port
+
 			defer wg.Done()
-			runConsumer(id, cfg.ServerPort, *groupId, *topic, int32(*partition))
+			runConsumer(id, port, *groupId, *topic, int32(*partition))
 		}(i)
 	}
 

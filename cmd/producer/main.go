@@ -20,6 +20,11 @@ func main() {
 	key := flag.String("key", "key", "key for message")
 	count := flag.Int("count", 1, "number of messages to send")
 
+	// TODO: producer should precalculate index of producer with GetTopicMetadata
+	// Each producer can send to any broker, depending on the key
+	// For now we hardcode the index
+	index := flag.Int("index", 0, "index of target broker")
+
 	flag.Parse()
 
 	wg := sync.WaitGroup{}
@@ -28,8 +33,13 @@ func main() {
 		wg.Add(1)
 
 		go func(id int) {
+			if *index >= len(cfg.Brokers) {
+				log.Fatalf("Invalid index %d for brokers", *index)
+			}
+			addr := cfg.Brokers[*index].Port
 			defer wg.Done()
-			runProducer(id, cfg.ServerPort, *topic, *key, *count)
+
+			runProducer(id, addr, *topic, *key, *count)
 		}(i)
 	}
 
