@@ -1,5 +1,18 @@
 {
   "base_path": "./data",
   "rollover_limit": 1048576,
-  "server_port": ":8080"
+  "brokers": [
+    {
+      "index": 0,
+      "port": ":8080"
+    },
+    {
+      "index": 1,
+      "port": ":8081"
+    },
+    {
+      "index": 2,
+      "port": ":8082"
+    }
+  ]
 }

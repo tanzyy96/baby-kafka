@@ -66,8 +66,8 @@ func NewServer(cfg *Config, brokerIndex int32) (*Server, error) {
 }
 
 func (s *Server) Start(ctx context.Context) error {
-	log.Info("Server started on ", s.Addr(), ", listening for connections...")
-	log.Info("Expecting ", len(s.brokerConfigs)-1, " other brokers in cluster")
+	log.Infof("Server started on %s, listening for connections...", s.Addr())
+	log.Infof("Expecting %d other brokers in cluster", len(s.brokerConfigs)-1)
 
 	wg := sync.WaitGroup{}
 
