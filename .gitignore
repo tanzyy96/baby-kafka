@@ -7,9 +7,11 @@
 *.dll
 *.so
 *.dylib
+baby-kafka
 
 # Test binary, built with `go test -c`
 *.test
+
 
 # Code coverage profiles and other test artifacts
 *.out
@@ -33,3 +35,4 @@ go.work.sum
 
 # Data dirs
 /data*
+
