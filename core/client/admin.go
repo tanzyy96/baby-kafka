@@ -33,7 +33,7 @@ func (a *Admin) CreateTopic(topic string, numPartitions int32) (*proto.Response,
 		NumPartitions: numPartitions,
 	}
 
-	if err := writeRequest(a.w, core.MessageTypeCreateTopic, payload); err != nil {
+	if err := proto.WriteRequest(a.w, core.MessageTypeCreateTopic, payload); err != nil {
 		return nil, fmt.Errorf("failed to write create topic request: %w", err)
 	}
 	if err := a.w.Flush(); err != nil {
@@ -44,7 +44,7 @@ func (a *Admin) CreateTopic(topic string, numPartitions int32) (*proto.Response,
 
 	// Read response
 	var resp proto.Response
-	if err := readResponse(a.conn, &resp); err != nil {
+	if err := proto.ReadResponse(a.conn, &resp); err != nil {
 		return nil, fmt.Errorf("failed to read create topic response: %w", err)
 	}
 
@@ -60,7 +60,7 @@ func (a *Admin) Close() error {
 }
 
 func (a *Admin) ListTopics() (*core.ListTopicsResponse, error) {
-	if err := writeRequest(a.w, core.MessageTypeListTopics, nil); err != nil {
+	if err := proto.WriteRequest(a.w, core.MessageTypeListTopics, nil); err != nil {
 		return nil, fmt.Errorf("failed to write list topics request: %w", err)
 	}
 	if err := a.w.Flush(); err != nil {
@@ -69,7 +69,7 @@ func (a *Admin) ListTopics() (*core.ListTopicsResponse, error) {
 
 	var topicsResp core.ListTopicsResponse
 	var resp proto.Response
-	if err := readResponse(a.conn, &resp); err != nil {
+	if err := proto.ReadResponse(a.conn, &resp); err != nil {
 		return nil, fmt.Errorf("failed to read list topics response: %w", err)
 	}
 

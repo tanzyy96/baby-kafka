@@ -5,6 +5,7 @@ Protocol package handling our custom wire protocol for communication between cli
 */
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"encoding/gob"
@@ -95,6 +96,53 @@ func WriteError(w io.Writer, status Status, err error) error {
 		return fmt.Errorf("failed to encode error response: %w", encErr)
 	}
 	return WriteFrame(w, b)
+}
+
+// WriteRequest writes a length-prefixed frame with a 1-byte message type and gob-encoded payload.
+func WriteRequest(w *bufio.Writer, msgType int, payload interface{}) error {
+	if payload == nil {
+		payload = struct{}{}
+	}
+	encoded, err := GobEncode(payload)
+	if err != nil {
+		return fmt.Errorf("failed to encode request: %w", err)
+	}
+
+	length := uint32(1 + len(encoded)) // 1 byte for message type + payload
+	buf := new(bytes.Buffer)
+
+	log.Debug("Writing request of type", "msgType", msgType, "type+payloadLength", length)
+
+	if err := binary.Write(buf, binary.BigEndian, length); err != nil {
+		return fmt.Errorf("failed to write request length: %w", err)
+	}
+	if err := buf.WriteByte(byte(msgType)); err != nil {
+		return fmt.Errorf("failed to write request message type: %w", err)
+	}
+	if _, err := buf.Write(encoded); err != nil {
+		return fmt.Errorf("failed to write request payload: %w", err)
+	}
+	_, err = w.Write(buf.Bytes())
+	return err
+}
+
+// ReadResponse reads a length-prefixed frame and decodes it into resp.
+func ReadResponse(r io.Reader, resp *Response) error {
+	var length uint32
+	if err := binary.Read(r, binary.BigEndian, &length); err != nil {
+		return fmt.Errorf("failed to read response length: %w", err)
+	}
+	log.Debugf("Receiving message with length: %d", length)
+
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return fmt.Errorf("failed to read response payload: %w", err)
+	}
+	if err := GobDecode(payload, resp); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+	log.Debug("Received response", "status", resp.Status, "error", resp.Error, "dataLength", len(resp.Data))
+	return nil
 }
 
 // GobEncode serialises v with gob and returns the resulting bytes.

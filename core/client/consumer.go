@@ -46,7 +46,7 @@ func (c *Consumer) Poll() (key []byte, value []byte, atOffset int64, err error) 
 
 	atOffset = c.offset
 
-	if err := writeRequest(c.w, core.MessageTypeConsume, payload); err != nil {
+	if err := proto.WriteRequest(c.w, core.MessageTypeConsume, payload); err != nil {
 		return nil, nil, atOffset, fmt.Errorf("failed to write consume request: %w", err)
 	}
 
@@ -58,7 +58,7 @@ func (c *Consumer) Poll() (key []byte, value []byte, atOffset int64, err error) 
 		cResp core.ConsumeResponse
 		resp  proto.Response
 	)
-	if err := readResponse(c.conn, &resp); err != nil {
+	if err := proto.ReadResponse(c.conn, &resp); err != nil {
 		return nil, nil, atOffset, fmt.Errorf("failed to read consume response: %w", err)
 	}
 
@@ -86,7 +86,7 @@ func (c *Consumer) CommitOffset(offset int64) error {
 		Offset:         offset,
 	}
 
-	if err := writeRequest(c.w, core.MessageTypeCommitOffset, payload); err != nil {
+	if err := proto.WriteRequest(c.w, core.MessageTypeCommitOffset, payload); err != nil {
 		return fmt.Errorf("failed to write commitOffset request: %w", err)
 	}
 
@@ -95,7 +95,7 @@ func (c *Consumer) CommitOffset(offset int64) error {
 	}
 
 	var resp proto.Response
-	if err := readResponse(c.conn, &resp); err != nil {
+	if err := proto.ReadResponse(c.conn, &resp); err != nil {
 		return fmt.Errorf("failed to read commitOffset response: %w", err)
 	}
 
@@ -114,7 +114,7 @@ func (c *Consumer) FetchOffset() (int64, error) {
 		PartitionIndex: c.partitionIndex,
 	}
 
-	if err := writeRequest(c.w, core.MessageTypeFetchOffset, payload); err != nil {
+	if err := proto.WriteRequest(c.w, core.MessageTypeFetchOffset, payload); err != nil {
 		return 0, fmt.Errorf("failed to write fetchOffset request: %w", err)
 	}
 
@@ -124,7 +124,7 @@ func (c *Consumer) FetchOffset() (int64, error) {
 
 	var resp proto.Response
 	var fresp core.FetchOffsetResponse
-	if err := readResponse(c.conn, &resp); err != nil {
+	if err := proto.ReadResponse(c.conn, &resp); err != nil {
 		return 0, fmt.Errorf("failed to read fetchOffset response: %w", err)
 	}
 

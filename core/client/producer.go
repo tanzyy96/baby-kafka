@@ -38,7 +38,7 @@ func (c *Producer) LoadTopicMetadata(topic string) (*core.TopicMetadata, error) 
 		Topic: topic,
 	}
 
-	if err := writeRequest(c.w, core.MessageTypeGetMetadata, payload); err != nil {
+	if err := proto.WriteRequest(c.w, core.MessageTypeGetMetadata, payload); err != nil {
 		return nil, fmt.Errorf("failed to write getTopicMetadata request: %w", err)
 	}
 
@@ -50,7 +50,7 @@ func (c *Producer) LoadTopicMetadata(topic string) (*core.TopicMetadata, error) 
 		mResp core.GetMetadataResponse
 		resp  proto.Response
 	)
-	if err := readResponse(c.conn, &resp); err != nil {
+	if err := proto.ReadResponse(c.conn, &resp); err != nil {
 		return nil, fmt.Errorf("failed to read consume response: %w", err)
 	}
 
@@ -88,7 +88,7 @@ func (p *Producer) Send(topic string, key, value []byte) (*core.ProduceResponse,
 		PartitionIndex: int32(partition),
 	}
 
-	if err := writeRequest(p.w, core.MessageTypeProduce, payload); err != nil {
+	if err := proto.WriteRequest(p.w, core.MessageTypeProduce, payload); err != nil {
 		return nil, fmt.Errorf("failed to write produce request: %w", err)
 	}
 	if err := p.w.Flush(); err != nil {
@@ -100,7 +100,7 @@ func (p *Producer) Send(topic string, key, value []byte) (*core.ProduceResponse,
 		resp     proto.Response
 		prodResp core.ProduceResponse
 	)
-	if err := readResponse(p.conn, &resp); err != nil {
+	if err := proto.ReadResponse(p.conn, &resp); err != nil {
 		return nil, fmt.Errorf("failed to read produce response: %w", err)
 	}
 
