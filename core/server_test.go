@@ -13,7 +13,7 @@ func newTestServer(t *testing.T) *Server {
 
 	cfg := DefaultConfig()
 	cfg.BasePath = dir
-	cfg.Brokers = []BrokerConfig{{Index: 0, Port: ":0"}}
+	cfg.Brokers = []BrokerConfig{{Index: 0, Addr: ":0"}}
 	s, err := NewServer(cfg, 0)
 	require.NoError(t, err)
 

@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"os"
+	"slices"
 	"sync/atomic"
 
 	"baby-kafka/internal/utils"
@@ -30,14 +31,16 @@ type Topic struct {
 	counter atomic.Uint64
 }
 
-// Creates topic and corresponding topic folder
-func NewTopic(key string, numPartition int32, folderPath string, rolloverLimit int64) (*Topic, error) {
+// NewTopic creates topic and corresponding topic folder. It then recursively creates partitions.
+func NewTopic(key string, partitionIndices []int32, folderPath string, rolloverLimit int64) (*Topic, error) {
 	topicPath := fmt.Sprintf("%s/%s", folderPath, key)
 	if err := os.Mkdir(topicPath, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create topic folder: %w", err)
 	}
+	log.Infof("Created topic %s at %s", key, topicPath)
+
 	partitions := make(map[int32]*Partition)
-	for i := range numPartition {
+	for _, i := range partitionIndices {
 		p, err := NewPartition(i, topicPath, rolloverLimit)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create partitions for topic: %w", err)
@@ -49,7 +52,7 @@ func NewTopic(key string, numPartition int32, folderPath string, rolloverLimit i
 		Key:           key,
 		folderPath:    topicPath,
 		partitions:    partitions,
-		numPartitions: numPartition,
+		numPartitions: int32(len(partitionIndices)),
 	}, nil
 }
 
@@ -60,7 +63,8 @@ func LoadTopic(topic, topicPath string, rolloverLimit int64) (*Topic, error) {
 	}
 	numPartitions := len(partitions)
 
-	if topic != offsetTopic {
+	specialTopics := []string{offsetTopic, metadataTopic}
+	if !slices.Contains(specialTopics, topic) {
 		log.Info("Loaded", "topic", topic, "numPartitions", numPartitions)
 	}
 
@@ -73,7 +77,7 @@ func LoadTopic(topic, topicPath string, rolloverLimit int64) (*Topic, error) {
 	}, nil
 }
 
-// Scan the directories to restore the topic states
+// LoadTopics scans the directories to restore the topic states
 func LoadTopics(basePath string, rolloverLimit int64) (map[string]*Topic, error) {
 	folders, err := os.ReadDir(basePath)
 	if err != nil {
@@ -81,8 +85,9 @@ func LoadTopics(basePath string, rolloverLimit int64) (map[string]*Topic, error)
 	}
 	topics := make(map[string]*Topic)
 
+	specialTopics := []string{offsetTopic, metadataTopic}
 	for _, folder := range folders {
-		if !folder.IsDir() || folder.Name() == offsetTopic {
+		if !folder.IsDir() || slices.Contains(specialTopics, folder.Name()) {
 			continue
 		}
 		folderPath := fmt.Sprintf("%s/%s", basePath, folder.Name())

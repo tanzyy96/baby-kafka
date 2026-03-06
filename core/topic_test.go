@@ -16,7 +16,7 @@ func newTestTopic(t *testing.T) *core.Topic {
 
 	rolloverSize := int64(1024 * 1024) // 1MB for testing
 
-	topic, err := core.NewTopic("test", 2, dir, rolloverSize)
+	topic, err := core.NewTopic("test", []int32{0, 1}, dir, rolloverSize)
 	require.NoError(t, err)
 
 	return topic

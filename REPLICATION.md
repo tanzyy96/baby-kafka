@@ -3,16 +3,42 @@
 ## Chapter 1: Distributed partition-leadership knowledge
 The objective is to ensure different components have distributed knowledge of partition leadership.
 
+### Chapter 1.1 Get To Know Each Other
+All brokers need to know of each other during start-up phase. This is simplified to using config.json (vs Zookeeper).
+When adminClient fires CreateTopic to a single broker, he needs to:
+- Create and assign in-memory partition distribution across available brokers
+- Inform other brokers of this distribution
+- Persist this distribution struct to disk
+For simplicity sake, we will do a single topic broadcast from the first broker. In real-world, we have a ControllerBroker that gets forwarded that CreateTopic request first then it initiates the broadcast. This is to prevent race condition if multiple CreateTopics(sameTopicId) were to be received by different brokers ie.
+- Broker1 gets CreateTopic("events"), Broker2 gets CreateTopic("events")
+- Broker1.Broadcast(metadata.events), Broker2.Broadcast(metadata.events)
+- Broker1 overwrites its own metadata when receiving Broker2 and vice versa -> state becomes inconsistent
+
+### Chapter 1.2 Create Topic And Broadcast
+handleCreateTopic:
+    1. initTopicPartitions(topic, numPartitions, replicationFactor, brokers)
+         → computes TopicMetadata (round-robin assignment)
+         → saves to __topic_metadata (MetadataManager)
+         → returns TopicMetadata
+
+    2. broker.CreateTopic(topic, numPartitions)
+         → creates local partition dirs + logs (already works)
+
+    3. for each peer broker:
+         → push TopicMetadata to peer via inter-broker RPC
+         → peer creates its local storage for the partitions it owns
+
 1. Brokers need to know each other and their addresses
     - [x] Config-based discovery: each broker config includes its own ID/address and a peers list
+    - [x] This is stored in Broker as `map[int32]BrokerClient` to maintain the network connections
 2. Brokers need to know the topics they are leading
-    - [ ] Assignment on CreateTopic: round-robin across known brokers, respects replicationFactor
-    - [ ] Validation: replicationFactor <= number of known brokers, else error
-    - [ ] MetadataManager: persists assignment to `__topic_metadata` (key=TopicMetadataKey, value=TopicMetadataValue)
-    - [ ] On broker startup: restore MetadataManager from `__topic_metadata` log
+    - [x] Assignment on CreateTopic: round-robin across known brokers, respects replicationFactor
+    - [x] Validation: replicationFactor <= number of known brokers, else error
+    - [x] MetadataManager: persists assignment to `__topic_metadata` (key=TopicMetadataKey, value=TopicMetadataValue)
+    - [x] LoadMetadataManager: On broker startup, restore MetadataManager from `__topic_metadata` log 
 3. All brokers share this knowledge
-    - [ ] On CreateTopic: receiving broker propagates metadata record to all peers via inter-broker RPC
-    - [ ] Each peer writes to their own `__topic_metadata` log
+    - [x] BroadcastMetadata: On CreateTopic: receiving broker propagates metadata record to all peers via inter-broker RPC
+    - [x] InsertMetadata: Each peer writes to their own `__topic_metadata` log
 4. Clients can discover partition leadership
     - [ ] GetMetadata request/response (already wired): returns leader + replicas + ISR per partition
     - [ ] Producers use this to know which broker to send writes to (must be leader)

@@ -36,7 +36,7 @@ func main() {
 			if *index < 0 || *index >= len(cfg.Brokers) {
 				log.Fatalf("Invalid index %d for broker address list", *index)
 			}
-			port := cfg.Brokers[*index].Port
+			port := cfg.Brokers[*index].Addr
 
 			defer wg.Done()
 			runConsumer(id, port, *groupId, *topic, int32(*partition))

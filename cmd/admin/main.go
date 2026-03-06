@@ -48,9 +48,9 @@ func main() {
 
 	if *list {
 		log.Printf("Listing topic...")
-		adminListTopics(cfg.Brokers[*index].Port)
+		adminListTopics(cfg.Brokers[*index].Addr)
 	} else if create.IsSet {
-		adminCreateTopic(cfg.Brokers[*index].Port, create.Topic, *numPartitions)
+		adminCreateTopic(cfg.Brokers[*index].Addr, create.Topic, *numPartitions)
 	} else {
 		log.Printf("No command provided. Use --create to create a topic or --list to list topics.")
 	}

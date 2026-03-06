@@ -14,8 +14,17 @@ func newTestBroker(t *testing.T) *core.Broker {
 	require.NoError(t, err)
 
 	rolloverSize := int64(1024 * 1024) // 1MB for testing
+	brokerConfigs := []core.BrokerConfig{
+		{Index: 0, Addr: ":9090"},
+	}
 
-	broker, err := core.NewBroker(dir, rolloverSize)
+	cfg := &core.Config{
+		BasePath:      dir,
+		RolloverLimit: rolloverSize,
+		Brokers:       brokerConfigs,
+	}
+
+	broker, err := core.NewBroker(0, cfg)
 	require.NoError(t, err)
 	return broker
 }

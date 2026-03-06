@@ -4,15 +4,12 @@
   "brokers": [
     {
       "index": 0,
-      "port": ":8080"
+      "addr": ":8080"
     },
     {
       "index": 1,
-      "port": ":8081"
-    },
-    {
-      "index": 2,
-      "port": ":8082"
+      "addr": ":8081"
     }
-  ]
+  ],
+  "replication_factor": 1
 }

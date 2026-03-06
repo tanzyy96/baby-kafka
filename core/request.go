@@ -68,6 +68,10 @@ type GetMetadataResponse struct {
 	Metadata *TopicMetadata
 }
 
+type BroadcastTopicMetadataRequest struct {
+	Metadata map[string]*TopicMetadata
+}
+
 // handleRequest decodes Req from payload, calls fn, encodes the Resp, and wraps it in a proto.Response frame.
 func handleRequest[Req any, Resp any](payload []byte, fn func(Req) (Resp, error)) ([]byte, error) {
 	var req Req
@@ -150,7 +154,7 @@ func (s *Server) handleListTopics() ([]byte, error) {
 
 func (s *Server) handleFetchOffset(payload []byte) ([]byte, error) {
 	return handleRequest(payload, func(req FetchOffsetRequest) (FetchOffsetResponse, error) {
-		log.Debugf("FetchOffset: group=%s topic=%s partition=%d", req.GroupId, req.Topic, req.PartitionIndex)
+		log.Debugf("Received FetchOffset: group=%s topic=%s partition=%d", req.GroupId, req.Topic, req.PartitionIndex)
 		offset, err := s.broker.FetchOffset(req.GroupId, req.Topic, req.PartitionIndex)
 		return FetchOffsetResponse{Offset: offset}, err
 	})
@@ -158,15 +162,22 @@ func (s *Server) handleFetchOffset(payload []byte) ([]byte, error) {
 
 func (s *Server) handleCommitOffset(payload []byte) ([]byte, error) {
 	return handleVoidRequest(payload, func(req CommitOffsetRequest) error {
-		log.Debugf("CommitOffset: group=%s topic=%s partition=%d offset=%d", req.GroupId, req.Topic, req.PartitionIndex, req.Offset)
+		log.Debugf("Received CommitOffset: group=%s topic=%s partition=%d offset=%d", req.GroupId, req.Topic, req.PartitionIndex, req.Offset)
 		return s.broker.CommitOffset(req.GroupId, req.Topic, req.PartitionIndex, req.Offset)
 	})
 }
 
 func (s *Server) handleGetMetadata(payload []byte) ([]byte, error) {
 	return handleRequest(payload, func(req GetMetadataRequest) (GetMetadataResponse, error) {
-		log.Debugf("GetMetadata: topic=%s", req.Topic)
+		log.Debug("Received GetMetadata", "topic", req.Topic)
 		metadata, err := s.broker.GetTopicMetadata(req.Topic)
 		return GetMetadataResponse{Metadata: metadata}, err
+	})
+}
+
+func (s *Server) handleBroadcastMetadata(payload []byte) ([]byte, error) {
+	return handleVoidRequest(payload, func(req BroadcastTopicMetadataRequest) error {
+		log.Debug("Received BroadcastMetadata", "metadata", req.Metadata)
+		return s.broker.InsertMetadata(req.Metadata)
 	})
 }

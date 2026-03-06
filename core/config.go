@@ -12,15 +12,26 @@ const (
 )
 
 type Config struct {
-	BasePath      string         `json:"base_path"`
-	RolloverLimit int64          `json:"rollover_limit"`
-	Brokers       []BrokerConfig `json:"brokers"`
+	BasePath          string         `json:"base_path"`
+	RolloverLimit     int64          `json:"rollover_limit"`
+	Brokers           []BrokerConfig `json:"brokers"`
+	ReplicationFactor int32          `json:"replication_factor"`
 }
 
-// This contains information on the other brokers/servers in the cluster
+// BrokerConfig contains information on the other brokers/servers in the cluster
 type BrokerConfig struct {
 	Index int32  `json:"index"`
-	Port  string `json:"port"`
+	Addr  string `json:"addr"`
+}
+
+type Option func(*Config)
+
+func WithBasePath(path string) Option {
+	return func(c *Config) { c.BasePath = path }
+}
+
+func WithReplicationFactor(factor int32) Option {
+	return func(c *Config) { c.ReplicationFactor = factor }
 }
 
 func DefaultConfig() *Config {
@@ -28,25 +39,30 @@ func DefaultConfig() *Config {
 		BasePath:      "./data",
 		RolloverLimit: 1024 * 1024, // 1MB
 		Brokers: []BrokerConfig{
-			{Index: 0, Port: ":8080"},
-			{Index: 1, Port: ":8081"},
-			{Index: 2, Port: ":8082"},
+			{Index: 0, Addr: ":8080"},
+			{Index: 1, Addr: ":8081"},
 		},
+		ReplicationFactor: 1,
 	}
 }
 
-// Try to load from config.yml, if not found, use default config
-func LoadConfig() *Config {
+// LoadConfig tries to load from config.yml, if not found, use default config
+func LoadConfig(overrides ...Option) *Config {
+	var cfg Config
 	b, err := os.ReadFile(ConfigPath)
 	if err != nil {
 		generateDefaultConfigFile()
-		return DefaultConfig()
+		cfg = *DefaultConfig()
 	}
 
-	var cfg Config
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		log.Warn("Failed to parse config file, using default config:", err)
-		return DefaultConfig()
+		cfg = *DefaultConfig()
+	}
+
+	// Apply overrides
+	for _, opt := range overrides {
+		opt(&cfg)
 	}
 
 	return &cfg

@@ -2,7 +2,8 @@ package utils
 
 import "hash/fnv"
 
-// Partitioning with hashkey, return uint to avoid potential overflows
+// PartitionFor gets the partition index for message key given numPartitions.
+// We use uint32 to avoid overflows
 func PartitionFor(key string, numPartitions uint32) uint32 {
 	h := fnv.New32a()
 	h.Write([]byte(key))

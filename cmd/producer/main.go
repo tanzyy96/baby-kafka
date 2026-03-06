@@ -36,7 +36,7 @@ func main() {
 			if *index >= len(cfg.Brokers) || *index < 0 {
 				log.Fatalf("Invalid index %d for brokers", *index)
 			}
-			addr := cfg.Brokers[*index].Port
+			addr := cfg.Brokers[*index].Addr
 			defer wg.Done()
 
 			runProducer(id, addr, *topic, *key, *count)

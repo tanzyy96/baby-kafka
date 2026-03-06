@@ -14,6 +14,8 @@ import (
 func main() {
 	debug := flag.Bool("debug", false, "enable debug logs")
 	index := flag.Int("index", 0, "broker index")
+	datadir := flag.String("datadir", "", "path to data directory")
+	replicationFactor := flag.Int("replication", 0, "replication factor for topics")
 
 	flag.Parse()
 
@@ -21,7 +23,21 @@ func main() {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	cfg := core.LoadConfig()
+	overrides := []core.Option{}
+	if *datadir != "" {
+		overrides = append(overrides, core.WithBasePath(*datadir))
+	}
+	if *replicationFactor != 0 {
+		overrides = append(overrides, core.WithReplicationFactor(int32(*replicationFactor)))
+	}
+
+	cfg := core.LoadConfig(overrides...)
+	log.Info("Loaded config", "config", *cfg)
+
+	if err := os.Mkdir(cfg.BasePath, 0o755); err != nil {
+		log.Warnf("Base path %s already exists", cfg.BasePath)
+	}
+
 	srv, err := core.NewServer(cfg, int32(*index))
 	if err != nil {
 		panic(err)

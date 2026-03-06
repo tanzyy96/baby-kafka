@@ -8,6 +8,7 @@ import (
 
 	"baby-kafka/core"
 	"baby-kafka/core/client"
+	"baby-kafka/internal/utils"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +20,7 @@ func startServer(t *testing.T, dir string) string {
 	t.Helper()
 	cfg := core.DefaultConfig()
 	cfg.BasePath = dir
-	cfg.Brokers = []core.BrokerConfig{{Index: 0, Port: ":0"}}
+	cfg.Brokers = []core.BrokerConfig{{Index: 0, Addr: ":0"}}
 
 	s, err := core.NewServer(cfg, 0)
 	require.NoError(t, err)
@@ -29,6 +30,131 @@ func startServer(t *testing.T, dir string) string {
 
 	go s.Start(ctx)
 	return s.Addr()
+}
+
+func TestIntegration_CreateTopic_AppearsInListTopics(t *testing.T) {
+	addr := startServer(t, t.TempDir())
+
+	admin, err := client.NewAdmin(addr)
+	require.NoError(t, err)
+	defer admin.Close()
+
+	_, err = admin.CreateTopic("events", 3)
+	require.NoError(t, err)
+
+	topics, err := admin.ListTopics()
+	require.NoError(t, err)
+	assert.Contains(t, topics.Topics, "events")
+}
+
+func TestIntegration_CreateTopic_Duplicate_Fails(t *testing.T) {
+	addr := startServer(t, t.TempDir())
+
+	admin, err := client.NewAdmin(addr)
+	require.NoError(t, err)
+	defer admin.Close()
+
+	_, err = admin.CreateTopic("events", 3)
+	require.NoError(t, err)
+
+	_, err = admin.CreateTopic("events", 3)
+	require.Error(t, err)
+}
+
+func TestIntegration_CreateTopic_ZeroPartitions_Fails(t *testing.T) {
+	addr := startServer(t, t.TempDir())
+
+	admin, err := client.NewAdmin(addr)
+	require.NoError(t, err)
+	defer admin.Close()
+
+	_, err = admin.CreateTopic("events", 0)
+	require.Error(t, err)
+}
+
+func TestIntegration_CreateTopic_MultiplePartitions_MessagesRouteCorrectly(t *testing.T) {
+	addr := startServer(t, t.TempDir())
+
+	admin, err := client.NewAdmin(addr)
+	require.NoError(t, err)
+	defer admin.Close()
+
+	const numPartitions = 3
+	_, err = admin.CreateTopic("multi-topic", numPartitions)
+	require.NoError(t, err)
+
+	producer, err := client.NewProducer(addr)
+	require.NoError(t, err)
+	defer producer.Close()
+
+	// Send messages with known keys and track expected partition per key
+	keys := []string{"alpha", "beta", "gamma", "delta"}
+	offsetPerPartition := make(map[int32]int64)
+
+	for _, key := range keys {
+		_, err := producer.Send("multi-topic", []byte(key), []byte("value-"+key))
+		require.NoError(t, err)
+	}
+
+	// Verify each key can be read from its expected partition
+	for _, key := range keys {
+		partition := int32(utils.PartitionFor(key, numPartitions))
+		offset := offsetPerPartition[partition]
+		offsetPerPartition[partition]++
+
+		consumer, err := client.NewConsumer(addr, "group1", "multi-topic", partition, offset)
+		require.NoError(t, err)
+
+		k, v, _, err := consumer.Poll()
+		consumer.Close()
+
+		require.NoError(t, err)
+		assert.Equal(t, []byte(key), k)
+		assert.Equal(t, []byte("value-"+key), v)
+	}
+}
+
+func TestIntegration_CreateTopic_PersistsAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+
+	// Start first server, create topic, shut down
+	cfg := core.DefaultConfig()
+	cfg.BasePath = dir
+	cfg.Brokers = []core.BrokerConfig{{Index: 0, Addr: ":0"}}
+
+	s, err := core.NewServer(cfg, 0)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.Start(ctx)
+	}()
+
+	admin, err := client.NewAdmin(s.Addr())
+	require.NoError(t, err)
+	_, err = admin.CreateTopic("durable-events", 2)
+	require.NoError(t, err)
+	admin.Close()
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down in time")
+	}
+
+	// Restart with same data dir, verify topic is still there
+	addr := startServer(t, dir)
+
+	admin2, err := client.NewAdmin(addr)
+	require.NoError(t, err)
+	defer admin2.Close()
+
+	topics, err := admin2.ListTopics()
+	require.NoError(t, err)
+	assert.Contains(t, topics.Topics, "durable-events")
 }
 
 func TestIntegration_ProduceAndConsume(t *testing.T) {
@@ -138,7 +264,7 @@ func TestIntegration_BrokerRestart(t *testing.T) {
 	// --- Server A ---
 	cfgA := core.DefaultConfig()
 	cfgA.BasePath = dir
-	cfgA.Brokers = []core.BrokerConfig{{Index: 0, Port: ":0"}}
+	cfgA.Brokers = []core.BrokerConfig{{Index: 0, Addr: ":0"}}
 
 	sA, err := core.NewServer(cfgA, 0)
 	require.NoError(t, err)

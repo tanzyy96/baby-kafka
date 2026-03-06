@@ -35,7 +35,7 @@ type Partition struct {
 	maxSize   int64 // cap for rollover
 }
 
-// Should create a new log and then register it to this partition
+// NewPartition should create a new log and then register it to this partition
 func NewPartition(index int32, folderPath string, maxSize int64) (*Partition, error) {
 	partitionPath := fmt.Sprintf("%s/partition-%d", folderPath, index)
 	if err := os.MkdirAll(partitionPath, 0o755); err != nil {
@@ -46,6 +46,8 @@ func NewPartition(index int32, folderPath string, maxSize int64) (*Partition, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to create partition: %w", err)
 	}
+
+	log.Infof("Created partition %d at %s", index, partitionPath)
 
 	if maxSize == 0 {
 		maxSize = MAX_SIZE
@@ -121,7 +123,7 @@ func LoadPartition(index int32, folderPath string, maxSize int64) (*Partition, e
 
 	// Determine active log based on max offset
 	active := activeLog(logs)
-	log.Infof("Loaded partition %d with %d log segment(s)", index, len(logs))
+	log.Debugf("Loaded partition %d with %d log segment(s)", index, len(logs))
 
 	return &Partition{
 		Path:      partitionPath,

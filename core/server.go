@@ -24,50 +24,51 @@ Wire protocol:
 */
 
 const (
-	MessageTypeProduce      = 1
-	MessageTypeConsume      = 2
-	MessageTypeCreateTopic  = 3
-	MessageTypeListTopics   = 4
-	MessageTypeFetchOffset  = 5
-	MessageTypeCommitOffset = 6
-	MessageTypeGetMetadata  = 7
+	MessageTypeProduce           = 1
+	MessageTypeConsume           = 2
+	MessageTypeCreateTopic       = 3
+	MessageTypeListTopics        = 4
+	MessageTypeFetchOffset       = 5
+	MessageTypeCommitOffset      = 6
+	MessageTypeGetMetadata       = 7
+	MessageTypeBroadcastMetadata = 8
 )
 
 type Server struct {
-	listener      *net.Listener
-	broker        *Broker
-	numClients    atomic.Int32
-	brokerConfigs []BrokerConfig
+	listener   *net.Listener
+	broker     *Broker
+	numClients atomic.Int32
 }
 
 type Request struct{}
 
 // TODO: add a Cluster struct to help spin up multiple servers
 // HAHA that sounds like docker-compose to Dockerfile
-func NewServer(cfg *Config, brokerIndex int32) (*Server, error) {
-	if brokerIndex < 0 || brokerIndex >= int32(len(cfg.Brokers)) {
-		return nil, fmt.Errorf("invalid broker index: %d", brokerIndex)
-	}
-	brokerConfig := cfg.Brokers[brokerIndex]
 
-	n, err := net.Listen("tcp", string(brokerConfig.Port))
+// NewServer creates a new server instance.
+func NewServer(cfg *Config, brokerID int32) (*Server, error) {
+	if brokerID < 0 || brokerID >= int32(len(cfg.Brokers)) {
+		return nil, fmt.Errorf("invalid broker index: %d", brokerID)
+	}
+	brokerConfig := cfg.Brokers[brokerID]
+
+	n, err := net.Listen("tcp", brokerConfig.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start network listener: %w", err)
 	}
-	b, err := NewBroker(cfg.BasePath, cfg.RolloverLimit)
+	b, err := NewBroker(brokerID, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create broker: %w", err)
 	}
+	log.Infof("Server %d started on %s", brokerID, n.Addr())
 	return &Server{
-		listener:      &n,
-		broker:        b,
-		brokerConfigs: cfg.Brokers,
+		listener: &n,
+		broker:   b,
 	}, nil
 }
 
 func (s *Server) Start(ctx context.Context) error {
 	log.Infof("Server started on %s, listening for connections...", s.Addr())
-	log.Infof("Expecting %d other brokers in cluster", len(s.brokerConfigs)-1)
 
 	wg := sync.WaitGroup{}
 
@@ -142,6 +143,8 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 			resp, err = s.handleCommitOffset(payload)
 		case MessageTypeGetMetadata:
 			resp, err = s.handleGetMetadata(payload)
+		case MessageTypeBroadcastMetadata:
+			resp, err = s.handleBroadcastMetadata(payload)
 		default:
 			log.Warnf("Unknown message type received: %d", msgType)
 			err = fmt.Errorf("unknown message type: %d", msgType)
