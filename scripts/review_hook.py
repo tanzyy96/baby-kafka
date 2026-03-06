@@ -4,7 +4,7 @@ review_hook.py - processes Claude code review JSON output.
 
 Usage:
     python3 scripts/review_hook.py render <json_file>   # print markdown review
-    python3 scripts/review_hook.py insert <json_file>   # insert TODO comments
+    python3 scripts/review_hook.py insert <json_file>   # insert FIXME comments
 """
 
 import sys
@@ -24,7 +24,7 @@ def load(json_file):
 
 def render(data):
     issues = data.get("issues", [])
-# TODO: Replace `data["summary"]` with `data.get("summary", "")` to avoid KeyError on missing field
+# FIXME: Replace `data["summary"]` with `data.get("summary", "")` to avoid KeyError on missing field
     lines = ["## Code Review", "", f'_{data["summary"]}_', ""]
     if not issues:
         lines.append("No issues found.")
@@ -37,7 +37,7 @@ def render(data):
 
 
 def insert(data):
-# TODO: Validate that `issue['file']` resolves to a path inside the project root before opening it (e.g., `os.path.realpath(filepath).startswith(os.path.realpath('.'))`)
+# FIXME: Validate that `issue['file']` resolves to a path inside the project root before opening it (e.g., `os.path.realpath(filepath).startswith(os.path.realpath('.'))`)
     by_file = defaultdict(list)
     for issue in data.get("issues", []):
         by_file[issue["file"]].append(issue)
@@ -56,12 +56,12 @@ def insert(data):
             target_line = lines[linenum - 1] if linenum - 1 < len(lines) else ""
             indent = len(target_line) - len(target_line.lstrip())
             indentation = target_line[:indent]
-            lines.insert(linenum - 1, f"{indentation}{prefix} TODO: {item['todo_comment']}\n")
+            lines.insert(linenum - 1, f"{indentation}{prefix} FIXME: {item['todo_comment']}\n")
             print(f"  {filepath}:{linenum}: {item['todo_comment']}")
         with open(filepath, "w") as f:
             f.writelines(lines)
 
-    print("\nTODOs inserted. Fix them and commit before pushing.")
+    print("\nFIXMEs inserted. Fix them and commit before pushing.")
 
 
 if __name__ == "__main__":
