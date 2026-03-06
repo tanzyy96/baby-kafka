@@ -9,9 +9,13 @@ import (
 	"baby-kafka/core"
 
 	"github.com/charmbracelet/log"
+	"github.com/common-nighthawk/go-figure"
 )
 
 func main() {
+	figure := figure.NewFigure("babykafka", "rectangles", true)
+	figure.Print()
+
 	debug := flag.Bool("debug", false, "enable debug logs")
 	index := flag.Int("index", 0, "broker index")
 	datadir := flag.String("datadir", "", "path to data directory")

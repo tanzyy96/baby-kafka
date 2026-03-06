@@ -1,10 +1,13 @@
-package test_utils
+package testutils
 
 import (
 	"net"
+	"sync/atomic"
 	"testing"
 
 	"baby-kafka/core/proto"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // NewMockServer starts a mock TCP server that accepts one connection and calls handler
@@ -42,4 +45,36 @@ func NewMockServer(t *testing.T, handler func(msgType int, payload []byte) proto
 
 	t.Cleanup(func() { ln.Close() })
 	return ln.Addr().String()
+}
+
+// NewTestConn starts a mock TCP server that accepts one connection and calls handler.
+func NewTestConn(t *testing.T, handlers ...func(msgType int, payload []byte) proto.Response) (clientConn net.Conn, serverConn net.Conn) {
+	clientConn, serverConn = net.Pipe()
+	var called atomic.Int32
+
+	go func() {
+		defer serverConn.Close()
+		for _, handler := range handlers {
+			// We need to use assert.NoError here because require.NoError doesn't work with goroutines
+			msgType, payload, err := proto.ReadFrame(serverConn)
+			assert.NoError(t, err)
+
+			resp := handler(msgType, payload)
+
+			data, err := proto.GobEncode(resp)
+			assert.NoError(t, err)
+
+			assert.NoError(t, proto.WriteFrame(serverConn, data))
+			called.Add(1)
+		}
+	}()
+
+	t.Cleanup(func() {
+		clientConn.Close()
+		if called.Load() < int32(len(handlers)) {
+			t.Errorf("Only %d of %d handlers were called", called.Load(), len(handlers))
+		}
+	})
+
+	return
 }

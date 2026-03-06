@@ -12,7 +12,13 @@ import (
 	"github.com/charmbracelet/log"
 )
 
-type Producer struct {
+type Producer interface {
+	FetchTopicMetadata(topic string) (*core.TopicMetadata, error)
+	Send(topic string, key, value []byte) (*core.ProduceResponse, error)
+	Close() error
+}
+
+type producer struct {
 	conn net.Conn
 	w    *bufio.Writer // We use a buffered writer to batch writes and improve performance
 
@@ -21,19 +27,23 @@ type Producer struct {
 	metadata map[string]*core.TopicMetadata
 }
 
-func NewProducer(addr string) (*Producer, error) {
+func NewProducer(addr string) (Producer, error) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	return &Producer{
+	return NewProducerFromConn(conn)
+}
+
+func NewProducerFromConn(conn net.Conn) (Producer, error) {
+	return &producer{
 		conn:     conn,
 		w:        bufio.NewWriter(conn),
 		metadata: make(map[string]*core.TopicMetadata),
 	}, nil
 }
 
-func (c *Producer) LoadTopicMetadata(topic string) (*core.TopicMetadata, error) {
+func (c *producer) FetchTopicMetadata(topic string) (*core.TopicMetadata, error) {
 	payload := core.GetMetadataRequest{
 		Topic: topic,
 	}
@@ -70,11 +80,11 @@ func (c *Producer) LoadTopicMetadata(topic string) (*core.TopicMetadata, error) 
 	return mResp.Metadata, nil
 }
 
-func (p *Producer) Send(topic string, key, value []byte) (*core.ProduceResponse, error) {
+func (p *producer) Send(topic string, key, value []byte) (*core.ProduceResponse, error) {
 	topicData, ok := p.metadata[topic]
 	if !ok {
 		var err error
-		topicData, err = p.LoadTopicMetadata(topic)
+		topicData, err = p.FetchTopicMetadata(topic)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load topic metadata: %w", err)
 		}
@@ -118,6 +128,6 @@ func (p *Producer) Send(topic string, key, value []byte) (*core.ProduceResponse,
 	return &prodResp, nil
 }
 
-func (p *Producer) Close() error {
+func (p *producer) Close() error {
 	return p.conn.Close()
 }

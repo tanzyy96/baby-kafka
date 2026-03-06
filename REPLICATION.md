@@ -6,15 +6,17 @@ The objective is to ensure different components have distributed knowledge of pa
 ### Chapter 1.1 Get To Know Each Other
 All brokers need to know of each other during start-up phase. This is simplified to using config.json (vs Zookeeper).
 When adminClient fires CreateTopic to a single broker, he needs to:
-- Create and assign in-memory partition distribution across available brokers
-- Inform other brokers of this distribution
-- Persist this distribution struct to disk
+1. Create and assign in-memory partition distribution across available brokers
+2. Inform other brokers of this distribution
+3. Persist this distribution struct to disk
+
 For simplicity sake, we will do a single topic broadcast from the first broker. In real-world, we have a ControllerBroker that gets forwarded that CreateTopic request first then it initiates the broadcast. This is to prevent race condition if multiple CreateTopics(sameTopicId) were to be received by different brokers ie.
-- Broker1 gets CreateTopic("events"), Broker2 gets CreateTopic("events")
-- Broker1.Broadcast(metadata.events), Broker2.Broadcast(metadata.events)
-- Broker1 overwrites its own metadata when receiving Broker2 and vice versa -> state becomes inconsistent
+1. Broker1 gets CreateTopic("events"), Broker2 gets CreateTopic("events")
+2. Broker1.Broadcast(metadata.events), Broker2.Broadcast(metadata.events)
+3. Broker1 overwrites its own metadata when receiving Broker2 and vice versa -> state becomes inconsistent
 
 ### Chapter 1.2 Create Topic And Broadcast
+```
 handleCreateTopic:
     1. initTopicPartitions(topic, numPartitions, replicationFactor, brokers)
          → computes TopicMetadata (round-robin assignment)
@@ -27,7 +29,9 @@ handleCreateTopic:
     3. for each peer broker:
          → push TopicMetadata to peer via inter-broker RPC
          → peer creates its local storage for the partitions it owns
+```
 
+#### Checklist
 1. Brokers need to know each other and their addresses
     - [x] Config-based discovery: each broker config includes its own ID/address and a peers list
     - [x] This is stored in Broker as `map[int32]BrokerClient` to maintain the network connections
@@ -39,10 +43,13 @@ handleCreateTopic:
 3. All brokers share this knowledge
     - [x] BroadcastMetadata: On CreateTopic: receiving broker propagates metadata record to all peers via inter-broker RPC
     - [x] InsertMetadata: Each peer writes to their own `__topic_metadata` log
-4. Clients can discover partition leadership
-    - [ ] GetMetadata request/response (already wired): returns leader + replicas + ISR per partition
-    - [ ] Producers use this to know which broker to send writes to (must be leader)
-    - [ ] Consumers use this to know which broker to read from
+
+
+### Chapter 1.3 Client Discovery
+Clients can discover partition leadership via GetMetadata.
+- [ ] GetMetadata request/response: returns leader + replicas + ISR per partition
+- [ ] Producers use this to know which broker to send writes to (must be leader)
+- [ ] Consumers use this to know which broker to read from
 
 ## Chapter 2: Log replication (leader → followers)
 The objective is to keep follower logs identical to the leader log.

@@ -15,13 +15,13 @@ type Consumer struct {
 	w    *bufio.Writer // Buffered writer that batches writes and flushes to connection
 
 	// Track state for polling
-	groupId        string
+	groupID        string
 	topic          string
 	partitionIndex int32
 	offset         int64
 }
 
-func NewConsumer(addr, groupId, topic string, partitionIndex int32, offset int64) (*Consumer, error) {
+func NewConsumer(addr, groupID, topic string, partitionIndex int32, offset int64) (*Consumer, error) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -32,13 +32,13 @@ func NewConsumer(addr, groupId, topic string, partitionIndex int32, offset int64
 		topic:          topic,
 		partitionIndex: partitionIndex,
 		offset:         offset,
-		groupId:        groupId,
+		groupID:        groupID,
 	}, nil
 }
 
 func (c *Consumer) Poll() (key []byte, value []byte, atOffset int64, err error) {
 	payload := core.ConsumeRequest{
-		GroupId:        c.groupId,
+		GroupId:        c.groupID,
 		Topic:          c.topic,
 		PartitionIndex: c.partitionIndex,
 		Offset:         c.offset,
@@ -80,7 +80,7 @@ func (c *Consumer) Poll() (key []byte, value []byte, atOffset int64, err error) 
 
 func (c *Consumer) CommitOffset(offset int64) error {
 	payload := core.CommitOffsetRequest{
-		GroupId:        c.groupId,
+		GroupId:        c.groupID,
 		Topic:          c.topic,
 		PartitionIndex: c.partitionIndex,
 		Offset:         offset,
@@ -106,10 +106,10 @@ func (c *Consumer) CommitOffset(offset int64) error {
 	return nil
 }
 
-// Fetches latestoffset and sets consumer offset to that value
+// FetchOffset retrieves the current offset for the consuemr and sets it
 func (c *Consumer) FetchOffset() (int64, error) {
 	payload := core.FetchOffsetRequest{
-		GroupId:        c.groupId,
+		GroupId:        c.groupID,
 		Topic:          c.topic,
 		PartitionIndex: c.partitionIndex,
 	}

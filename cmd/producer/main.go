@@ -55,7 +55,7 @@ func runProducer(id int, addr, topic, key string, numMessages int) {
 	hr, min, sec := time.Now().Clock()
 	value := fmt.Sprintf("Sent by producer %d at %d:%d:%d", id, hr, min, sec)
 
-	for i := 0; i < numMessages; i++ {
+	for range numMessages {
 		if _, err := p.Send(topic, []byte(key), []byte(value)); err != nil {
 			log.Fatal("Failed to send message:", err)
 		}
