@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 
@@ -12,47 +13,109 @@ import (
 	"github.com/charmbracelet/log"
 )
 
+const bootstrapBrokerID = int32(0)
+
 type Producer interface {
-	FetchTopicMetadata(topic string) (*core.TopicMetadata, error)
+	ConnectBootstrap() error
+	FetchTopicMetadata(brokerID int32, topic string) (*core.TopicMetadata, error)
 	Send(topic string, key, value []byte) (*core.ProduceResponse, error)
 	Close() error
 }
 
 type producer struct {
-	conn net.Conn
-	w    *bufio.Writer // We use a buffered writer to batch writes and improve performance
+	dialFn     func(addr string) (net.Conn, error) // Allows overriding the dial function for testing
+	cfg        *core.Config
+	brokerConn map[int32]net.Conn
+	writers    map[int32]*bufio.Writer // We use a buffered writer to batch writes and improve performance
 
 	// Metadata is able to store metadata for different topics
 	// If the topic is not found, we will load metadata for that topic
 	metadata map[string]*core.TopicMetadata
 }
 
-func NewProducer(addr string) (Producer, error) {
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return nil, err
+type Option func(*producer)
+
+func WithDialFn(fn func(addr string) (net.Conn, error)) Option {
+	return func(p *producer) {
+		p.dialFn = fn
 	}
-	return NewProducerFromConn(conn)
 }
 
-func NewProducerFromConn(conn net.Conn) (Producer, error) {
-	return &producer{
-		conn:     conn,
-		w:        bufio.NewWriter(conn),
-		metadata: make(map[string]*core.TopicMetadata),
-	}, nil
+func NewProducer(cfg *core.Config, opts ...Option) (Producer, error) {
+	brokerConn := make(map[int32]net.Conn)
+	writers := make(map[int32]*bufio.Writer)
+	metadata := make(map[string]*core.TopicMetadata)
+	dialFn := func(addr string) (net.Conn, error) { return net.Dial("tcp", addr) }
+
+	p := &producer{
+		dialFn:     dialFn,
+		cfg:        cfg,
+		brokerConn: brokerConn,
+		writers:    writers,
+		metadata:   metadata,
+	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p, nil
 }
 
-func (c *producer) FetchTopicMetadata(topic string) (*core.TopicMetadata, error) {
+func (p *producer) brokerWithLeaderPartition(topic string, partitionID int32) (int32, error) {
+	topicData, ok := p.metadata[topic]
+	if !ok {
+		return -1, fmt.Errorf("topic %s not found", topic)
+	}
+	for _, partition := range topicData.PartitionMetadata {
+		if partition.PartitionIndex == partitionID {
+			return partition.Leader, nil
+		}
+	}
+	return -1, fmt.Errorf("no partition found for topic %s", topic)
+}
+
+func (p *producer) connFor(brokerID int32) (net.Conn, *bufio.Writer, error) {
+	if conn, ok := p.brokerConn[brokerID]; ok {
+		writer, wOk := p.writers[brokerID]
+		if !wOk {
+			return nil, nil, errors.New("connection found but writer missing")
+		}
+		return conn, writer, nil
+	}
+	if int(brokerID) >= len(p.cfg.Brokers) {
+		return nil, nil, errors.New("illegal brokerID")
+	}
+	addr := p.cfg.Brokers[brokerID].Addr
+	conn, err := p.dialFn(addr)
+	if err != nil {
+		return nil, nil, err
+	}
+	p.brokerConn[brokerID] = conn
+	p.writers[brokerID] = bufio.NewWriter(conn)
+	return conn, p.writers[brokerID], nil
+}
+
+// SetupBootstrap connects to the bootstrap broker first for validation
+func (p *producer) ConnectBootstrap() error {
+	if _, _, err := p.connFor(bootstrapBrokerID); err != nil {
+		return fmt.Errorf("failed to connect to bootstrap broker: %w", err)
+	}
+	return nil
+}
+
+func (p *producer) FetchTopicMetadata(brokerID int32, topic string) (*core.TopicMetadata, error) {
+	conn, writer, err := p.connFor(brokerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to FetchTopicMetadata: %w", err)
+	}
 	payload := core.GetMetadataRequest{
 		Topic: topic,
 	}
 
-	if err := proto.WriteRequest(c.w, core.MessageTypeGetMetadata, payload); err != nil {
+	if err := proto.WriteRequest(writer, core.MessageTypeGetMetadata, payload); err != nil {
 		return nil, fmt.Errorf("failed to write getTopicMetadata request: %w", err)
 	}
 
-	if err := c.w.Flush(); err != nil {
+	if err := writer.Flush(); err != nil {
 		return nil, fmt.Errorf("failed to flush consume request: %w", err)
 	}
 
@@ -60,7 +123,7 @@ func (c *producer) FetchTopicMetadata(topic string) (*core.TopicMetadata, error)
 		mResp core.GetMetadataResponse
 		resp  proto.Response
 	)
-	if err := proto.ReadResponse(c.conn, &resp); err != nil {
+	if err := proto.ReadResponse(conn, &resp); err != nil {
 		return nil, fmt.Errorf("failed to read consume response: %w", err)
 	}
 
@@ -74,23 +137,35 @@ func (c *producer) FetchTopicMetadata(topic string) (*core.TopicMetadata, error)
 	}
 
 	// set metadata and partition index
-	c.metadata[topic] = mResp.Metadata
+	p.metadata[topic] = mResp.Metadata
 	log.Info("Loaded topic metadata", "topic", topic)
 
 	return mResp.Metadata, nil
 }
 
 func (p *producer) Send(topic string, key, value []byte) (*core.ProduceResponse, error) {
+	// Before sending, ensure metadata is loaded
+	// This helps us figure out which broker is holding the leader for the partition
 	topicData, ok := p.metadata[topic]
 	if !ok {
 		var err error
-		topicData, err = p.FetchTopicMetadata(topic)
+		topicData, err = p.FetchTopicMetadata(bootstrapBrokerID, topic)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load topic metadata: %w", err)
 		}
 	}
 
 	partition := utils.PartitionFor(string(key), uint32(topicData.NumPartitions))
+	brokerID, err := p.brokerWithLeaderPartition(topic, int32(partition))
+	if err != nil {
+		return nil, fmt.Errorf("failed to send message: %w", err)
+	}
+
+	conn, writer, err := p.connFor(brokerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send message to broker %d: %w", brokerID, err)
+	}
+
 	payload := core.ProduceRequest{
 		Key:            key,
 		Value:          value,
@@ -98,10 +173,10 @@ func (p *producer) Send(topic string, key, value []byte) (*core.ProduceResponse,
 		PartitionIndex: int32(partition),
 	}
 
-	if err := proto.WriteRequest(p.w, core.MessageTypeProduce, payload); err != nil {
+	if err := proto.WriteRequest(writer, core.MessageTypeProduce, payload); err != nil {
 		return nil, fmt.Errorf("failed to write produce request: %w", err)
 	}
-	if err := p.w.Flush(); err != nil {
+	if err := writer.Flush(); err != nil {
 		return nil, fmt.Errorf("failed to flush produce request: %w", err)
 	}
 
@@ -110,7 +185,7 @@ func (p *producer) Send(topic string, key, value []byte) (*core.ProduceResponse,
 		resp     proto.Response
 		prodResp core.ProduceResponse
 	)
-	if err := proto.ReadResponse(p.conn, &resp); err != nil {
+	if err := proto.ReadResponse(conn, &resp); err != nil {
 		return nil, fmt.Errorf("failed to read produce response: %w", err)
 	}
 
@@ -129,5 +204,10 @@ func (p *producer) Send(topic string, key, value []byte) (*core.ProduceResponse,
 }
 
 func (p *producer) Close() error {
-	return p.conn.Close()
+	for _, conn := range p.brokerConn {
+		if err := conn.Close(); err != nil {
+			log.Warn("Failed to close connection", "err", err)
+		}
+	}
+	return nil
 }

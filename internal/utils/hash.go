@@ -1,6 +1,8 @@
 package utils
 
-import "hash/fnv"
+import (
+	"hash/fnv"
+)
 
 // PartitionFor gets the partition index for message key given numPartitions.
 // We use uint32 to avoid overflows

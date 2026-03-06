@@ -106,7 +106,7 @@ func (c *Consumer) CommitOffset(offset int64) error {
 	return nil
 }
 
-// FetchOffset retrieves the current offset for the consuemr and sets it
+// FetchOffset retrieves the current offset for the consumer and sets it
 func (c *Consumer) FetchOffset() (int64, error) {
 	payload := core.FetchOffsetRequest{
 		GroupId:        c.groupID,

@@ -2,6 +2,7 @@ package testutils
 
 import (
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -52,7 +53,13 @@ func NewTestConn(t *testing.T, handlers ...func(msgType int, payload []byte) pro
 	clientConn, serverConn = net.Pipe()
 	var called atomic.Int32
 
+	// There is a race condition here because the called.Add(1) might not run before t.Cleanup
+	// Hence, we use a WaitGroup to ensure that the goroutine has completely finished before t.Cleanup runs.
+	var wg sync.WaitGroup
+	wg.Add(1)
+
 	go func() {
+		defer wg.Done()
 		defer serverConn.Close()
 		for _, handler := range handlers {
 			// We need to use assert.NoError here because require.NoError doesn't work with goroutines
@@ -71,6 +78,8 @@ func NewTestConn(t *testing.T, handlers ...func(msgType int, payload []byte) pro
 
 	t.Cleanup(func() {
 		clientConn.Close()
+		wg.Wait()
+
 		if called.Load() < int32(len(handlers)) {
 			t.Errorf("Only %d of %d handlers were called", called.Load(), len(handlers))
 		}

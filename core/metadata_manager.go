@@ -168,8 +168,8 @@ func (m *metadataManager) createAndAssign(brokerConfigs []BrokerConfig, topic st
 
 	// Random pick a leader broker
 	leaderBrokerID := int32(0)
-	if numPartitions > 1 {
-		leaderBrokerID = int32(rand.Intn(int(numPartitions - 1)))
+	if numBrokers > 1 {
+		leaderBrokerID = int32(rand.Intn(int(numBrokers)))
 	}
 	for i := range numPartitions {
 		leader := (leaderBrokerID + i) % numBrokers

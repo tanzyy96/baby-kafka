@@ -13,8 +13,8 @@ import (
 )
 
 func main() {
-	figure := figure.NewFigure("babykafka", "rectangles", true)
-	figure.Print()
+	fig := figure.NewFigure("babykafka", "rectangles", true)
+	fig.Print()
 
 	debug := flag.Bool("debug", false, "enable debug logs")
 	index := flag.Int("index", 0, "broker index")

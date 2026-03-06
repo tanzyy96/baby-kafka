@@ -20,10 +20,9 @@ func main() {
 	key := flag.String("key", "key", "key for message")
 	count := flag.Int("count", 1, "number of messages to send")
 
-	// TODO: producer should precalculate index of producer with GetTopicMetadata
-	// Each producer can send to any broker, depending on the key
-	// For now we hardcode the index
-	index := flag.Int("index", 0, "index of target broker")
+	// Producer should call one broker aka bootstrap, and then fetch the topic metadata
+	// It should get all the partition distribution such that for given topic + key,
+	// it can figure out which broker to send the message to
 
 	flag.Parse()
 
@@ -33,29 +32,30 @@ func main() {
 		wg.Add(1)
 
 		go func(id int) {
-			if *index >= len(cfg.Brokers) || *index < 0 {
-				log.Fatalf("Invalid index %d for brokers", *index)
-			}
-			addr := cfg.Brokers[*index].Addr
 			defer wg.Done()
 
-			runProducer(id, addr, *topic, *key, *count)
+			runProducer(id, cfg, *topic, *key, *count)
 		}(i)
 	}
 
 	wg.Wait()
 }
 
-func runProducer(id int, addr, topic, key string, numMessages int) {
-	p, err := client.NewProducer(addr)
+func runProducer(id int, cfg *core.Config, topic, key string, numMessages int) {
+	p, err := client.NewProducer(cfg)
 	if err != nil {
 		log.Fatalf("Failed to create producer %d: %s", id, err)
+	}
+	defer p.Close()
+
+	if err := p.ConnectBootstrap(); err != nil {
+		log.Fatalf("Failed to connect to bootstrap broker for producer %d: %s", id, err)
 	}
 
 	hr, min, sec := time.Now().Clock()
 	value := fmt.Sprintf("Sent by producer %d at %d:%d:%d", id, hr, min, sec)
 
-	for range numMessages {
+	for i := 0; i < numMessages; i++ {
 		if _, err := p.Send(topic, []byte(key), []byte(value)); err != nil {
 			log.Fatal("Failed to send message:", err)
 		}
