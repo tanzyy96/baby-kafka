@@ -192,6 +192,10 @@ func (b *Broker) CommitOffset(groupId, topic string, partitionIndex int32, newOf
 }
 
 func (b *Broker) GetTopicMetadata(topicName string) (*TopicMetadata, error) {
+	if meta := b.metadataManager.Get(topicName); meta != nil {
+		return meta, nil
+	}
+	// Fallback for topics that predate the metadata manager
 	topic, err := b.GetTopic(topicName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get topic metadata: %w", err)

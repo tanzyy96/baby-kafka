@@ -14,8 +14,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func newTestProducer(t *testing.T, addr string) client.Producer {
+	t.Helper()
+	cfg := &core.Config{Brokers: []core.BrokerConfig{{Index: 0, Addr: addr}}}
+	p, err := client.NewProducer(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { p.Close() })
+	return p
+}
+
 // startServer spins up a real server in a goroutine using the given data dir.
 // Cancels the context on t.Cleanup to shut it down.
+// TODO: support multiple brokers cuz consumers don't work with multiple brokers yet
 func startServer(t *testing.T, dir string) string {
 	t.Helper()
 	cfg := core.DefaultConfig()
@@ -83,9 +93,7 @@ func TestIntegration_CreateTopic_MultiplePartitions_MessagesRouteCorrectly(t *te
 	_, err = admin.CreateTopic("multi-topic", numPartitions)
 	require.NoError(t, err)
 
-	producer, err := client.NewProducer(addr)
-	require.NoError(t, err)
-	defer producer.Close()
+	producer := newTestProducer(t, addr)
 
 	// Send messages with known keys and track expected partition per key
 	keys := []string{"alpha", "beta", "gamma", "delta"}
@@ -167,9 +175,7 @@ func TestIntegration_ProduceAndConsume(t *testing.T) {
 	_, err = admin.CreateTopic("test-topic", 1)
 	require.NoError(t, err)
 
-	producer, err := client.NewProducer(addr)
-	require.NoError(t, err)
-	defer producer.Close()
+	producer := newTestProducer(t, addr)
 
 	resp, err := producer.Send("test-topic", []byte("key1"), []byte("value1"))
 	require.NoError(t, err)
@@ -196,13 +202,11 @@ func TestIntegration_MultipleMessages_InOrder(t *testing.T) {
 	_, err = admin.CreateTopic("ordered-topic", 1)
 	require.NoError(t, err)
 
-	producer, err := client.NewProducer(addr)
-	require.NoError(t, err)
-	defer producer.Close()
+	producer := newTestProducer(t, addr)
 
 	const n = 5
-	for i := 0; i < n; i++ {
-		_, err := producer.Send("ordered-topic", []byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("msg%d", i)))
+	for i := range n {
+		_, err := producer.Send("ordered-topic", fmt.Appendf(nil, "key%d", i), fmt.Appendf(nil, "msg%d", i))
 		require.NoError(t, err)
 	}
 
@@ -210,7 +214,7 @@ func TestIntegration_MultipleMessages_InOrder(t *testing.T) {
 	require.NoError(t, err)
 	defer consumer.Close()
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key, value, atOffset, err := consumer.Poll()
 		require.NoError(t, err)
 		assert.Equal(t, []byte(fmt.Sprintf("key%d", i)), key)
@@ -229,9 +233,7 @@ func TestIntegration_ConsumeFromMidOffset(t *testing.T) {
 	_, err = admin.CreateTopic("mid-offset-topic", 1)
 	require.NoError(t, err)
 
-	producer, err := client.NewProducer(addr)
-	require.NoError(t, err)
-	defer producer.Close()
+	producer := newTestProducer(t, addr)
 
 	for i := 0; i < 5; i++ {
 		_, err := producer.Send("mid-offset-topic", []byte(fmt.Sprintf("k%d", i)), []byte(fmt.Sprintf("v%d", i)))
@@ -284,13 +286,11 @@ func TestIntegration_BrokerRestart(t *testing.T) {
 	require.NoError(t, err)
 	admin.Close()
 
-	producer, err := client.NewProducer(addrA)
-	require.NoError(t, err)
+	producer := newTestProducer(t, addrA)
 	for i := 0; i < 3; i++ {
 		_, err := producer.Send("durable-topic", []byte(fmt.Sprintf("k%d", i)), []byte(fmt.Sprintf("v%d", i)))
 		require.NoError(t, err)
 	}
-	producer.Close()
 
 	cancelA()
 	select {
