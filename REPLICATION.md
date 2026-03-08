@@ -48,8 +48,13 @@ handleCreateTopic:
 ### Chapter 1.3 Client Discovery
 Clients can discover partition leadership via GetMetadata.
 - [x] GetMetadata request/response: returns leader + replicas (later with ISR) per partition
-- [x] Producers use this to know which broker to send writes to (must be leader)
-- [ ] Consumers use this to know which broker to read from
+- [x] Multibroker Support for Producers
+    - [x] Producer fetches topic metadata from bootstrap broker
+    - [x] For a given key, producer knows which broker has the corresponding partition and sends the message there -> Send(topic, key, value)
+    - [x] Perform lazy connection when it has to send to a new broker
+- [x] Multibroker Support for Consumers
+    - [x] Consumer fetches topic metadata from bootstrap broker
+    - [x] Consumer is initialised with groupID and target partitions. We'll spin up the correct number of partitions from the `main.go` side for now. Later on we'll dynamically allocate partitions based on consumer group size via a coordinator.
 
 ## Chapter 2: Log replication (leader → followers)
 The objective is to keep follower logs identical to the leader log.

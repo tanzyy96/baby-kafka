@@ -10,26 +10,25 @@ import (
 
 var ErrOffsetNotFound = errors.New("offset not found")
 
-// We don't really need this, but more for my own reference
-type BrokerInterface interface {
+type Broker interface {
 	CreateTopic(name string, numPartitions int32) error
 	GetTopic(name string) (*Topic, error)
 	ListTopics() []string
 
 	// For messaging
-	Produce(topicName string, msg Message) error
+	Produce(topicName string, partitionIndex int32, msg Message) (int64, error)
 	Consume(topicName string, partitionIndex int32, offset int64) (*Message, error)
 
 	// For offsets
-	FetchOffset(groupId, topic string, partitionIndex int32) (int64, error)
-	CommitOffset(groupId, topic string, partitionIndex int32, newOffset int64) error
+	FetchOffset(groupID, topic string, partitionIndex int32) (int64, error)
+	CommitOffset(groupID, topic string, partitionIndex int32, newOffset int64) error
 
 	GetTopicMetadata(topicName string) (*TopicMetadata, error)
 	BroadcastMetadata(topic string) error
 	UpdateMetadata(map[string]*TopicMetadata) error
 }
 
-type Broker struct {
+type broker struct {
 	id                int32
 	topics            map[string]*Topic
 	basePath          string
@@ -43,7 +42,7 @@ type Broker struct {
 	metadataManager MetadataManager
 }
 
-func NewBroker(id int32, cfg *Config) (*Broker, error) {
+func NewBroker(id int32, cfg *Config) (Broker, error) {
 	brokerPath := fmt.Sprintf("%s/broker-%d", cfg.BasePath, id)
 	// Try creating the base path for the broker if it doesn't exist
 	if err := os.Mkdir(brokerPath, 0o755); err != nil {
@@ -64,7 +63,7 @@ func NewBroker(id int32, cfg *Config) (*Broker, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to init broker: %w", err)
 	}
-	return &Broker{
+	return &broker{
 		id:              id,
 		topics:          topics,
 		basePath:        brokerPath,
@@ -76,7 +75,7 @@ func NewBroker(id int32, cfg *Config) (*Broker, error) {
 	}, nil
 }
 
-func LoadBroker(id int32, cfg *Config) (*Broker, error) {
+func LoadBroker(id int32, cfg *Config) (Broker, error) {
 	brokerPath := fmt.Sprintf("%s/broker-%d", cfg.BasePath, id)
 	topics, err := LoadTopics(brokerPath, cfg.RolloverLimit)
 	if err != nil {
@@ -91,7 +90,7 @@ func LoadBroker(id int32, cfg *Config) (*Broker, error) {
 		return nil, fmt.Errorf("failed to load broker: %w", err)
 	}
 
-	return &Broker{
+	return &broker{
 		id:                id,
 		topics:            topics,
 		basePath:          brokerPath,
@@ -121,7 +120,7 @@ func initBrokerClients(id int32, configs []BrokerConfig) map[int32]BrokerClient 
 }
 
 // CreateTopic creates the topic metadata and initializes the topic folders.
-func (b *Broker) CreateTopic(key string, numPartitions int32) error {
+func (b *broker) CreateTopic(key string, numPartitions int32) error {
 	if numPartitions == 0 {
 		return fmt.Errorf("numPartitions must be greater than zero")
 	}
@@ -149,7 +148,7 @@ func (b *Broker) CreateTopic(key string, numPartitions int32) error {
 	return nil
 }
 
-func (b *Broker) GetTopic(key string) (*Topic, error) {
+func (b *broker) GetTopic(key string) (*Topic, error) {
 	topic, exists := b.topics[key]
 	if !exists {
 		return nil, fmt.Errorf("topic with key not found: %s", key)
@@ -157,7 +156,7 @@ func (b *Broker) GetTopic(key string) (*Topic, error) {
 	return topic, nil
 }
 
-func (b *Broker) ListTopics() []string {
+func (b *broker) ListTopics() []string {
 	keys := make([]string, 0, len(b.topics))
 	for key := range b.topics {
 		keys = append(keys, key)
@@ -165,7 +164,7 @@ func (b *Broker) ListTopics() []string {
 	return keys
 }
 
-func (b *Broker) Produce(topicName string, partitionIndex int32, msg Message) (int64, error) {
+func (b *broker) Produce(topicName string, partitionIndex int32, msg Message) (int64, error) {
 	topic, err := b.GetTopic(topicName)
 	if err != nil {
 		return 0, fmt.Errorf("failed to produce message: %w", err)
@@ -173,7 +172,7 @@ func (b *Broker) Produce(topicName string, partitionIndex int32, msg Message) (i
 	return topic.Append(partitionIndex, msg)
 }
 
-func (b *Broker) Consume(topicName string, partitionIndex int32, offset int64) (*Message, error) {
+func (b *broker) Consume(topicName string, partitionIndex int32, offset int64) (*Message, error) {
 	topic, err := b.GetTopic(topicName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to consume message: %w", err)
@@ -181,17 +180,17 @@ func (b *Broker) Consume(topicName string, partitionIndex int32, offset int64) (
 	return topic.ReadAt(partitionIndex, offset)
 }
 
-func (b *Broker) FetchOffset(groupId, topic string, partitionIndex int32) (int64, error) {
-	offset, _ := b.offsetManager.Offset(groupId, topic, partitionIndex)
+func (b *broker) FetchOffset(groupID, topic string, partitionIndex int32) (int64, error) {
+	offset, _ := b.offsetManager.Offset(groupID, topic, partitionIndex)
 	return offset, nil
 }
 
-func (b *Broker) CommitOffset(groupId, topic string, partitionIndex int32, newOffset int64) error {
-	b.offsetManager.CommitOffset(groupId, topic, partitionIndex, newOffset)
+func (b *broker) CommitOffset(groupID, topic string, partitionIndex int32, newOffset int64) error {
+	b.offsetManager.CommitOffset(groupID, topic, partitionIndex, newOffset)
 	return nil
 }
 
-func (b *Broker) GetTopicMetadata(topicName string) (*TopicMetadata, error) {
+func (b *broker) GetTopicMetadata(topicName string) (*TopicMetadata, error) {
 	if meta := b.metadataManager.Get(topicName); meta != nil {
 		return meta, nil
 	}
@@ -207,7 +206,7 @@ func (b *Broker) GetTopicMetadata(topicName string) (*TopicMetadata, error) {
 }
 
 // BroadcastMetadata syncs topic metadata across all brokers
-func (b *Broker) BroadcastMetadata(topic string) error {
+func (b *broker) BroadcastMetadata(topic string) error {
 	topicMetadata := b.metadataManager.Get(topic)
 	for _, client := range b.brokerClients {
 		if err := client.Broadcast(topic, topicMetadata); err != nil {
@@ -218,7 +217,7 @@ func (b *Broker) BroadcastMetadata(topic string) error {
 	return nil
 }
 
-func (b *Broker) InsertMetadata(newMeta map[string]*TopicMetadata) error {
+func (b *broker) InsertMetadata(newMeta map[string]*TopicMetadata) error {
 	// We receive the broadcasted metadata update from another broker.
 	// If any new topic is added, create the topic and any partitions this broker is responsible for.
 	newTopics := []string{}

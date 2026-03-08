@@ -65,10 +65,10 @@
 - [ ] Stress test — concurrent producers and consumers, no messages lost or duplicated
 
 ## Phase 7.5: __consumer_offsets partitioning
-- [ ] Route offset commits/fetches to correct partition via hash(groupId) % numPartitions
-- [ ] Create __consumer_offsets through normal CreateTopic flow (gets partition assignment + replication)
-- [ ] Forward commits/fetches to the correct partition leader (group coordinator pattern)
-- [ ] See REPLICATION_CONCEPTS.md for full explanation
+- [x] Route offset commits/fetches to correct partition via hash(groupId) % numPartitions
+- [x] Create __consumer_offsets through normal CreateTopic flow (gets partition assignment + replication)
+- [x] Forward commits/fetches to the correct partition leader (group coordinator pattern)
+- [x] See REPLICATION_CONCEPTS.md for full explanation
 
 ## Phase 7.9 Cleanup
 - [ ] Refactor partition logic to producer-side instead of broker side
