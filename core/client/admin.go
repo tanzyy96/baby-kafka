@@ -1,3 +1,6 @@
+/*
+Package client contains modules for admin, producer and consumer operations
+*/
 package client
 
 import (

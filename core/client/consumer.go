@@ -10,7 +10,20 @@ import (
 	"baby-kafka/core/proto"
 )
 
-type Consumer struct {
+type Consumer interface {
+	// ConnectBootstrap() error
+	Poll() (key []byte, value []byte, atOffset int64, err error)
+	CommitOffset(offset int64) error
+	FetchOffset() (int64, error)
+	Close() error
+}
+
+type consumer struct {
+	dialFn     func(addr string) (net.Conn, error)
+	cfg        *core.Config
+	brokerConn map[int32]net.Conn
+	writers    map[int32]*bufio.Writer
+
 	conn net.Conn
 	w    *bufio.Writer // Buffered writer that batches writes and flushes to connection
 
@@ -21,12 +34,12 @@ type Consumer struct {
 	offset         int64
 }
 
-func NewConsumer(addr, groupID, topic string, partitionIndex int32, offset int64) (*Consumer, error) {
+func NewConsumer(addr, groupID, topic string, partitionIndex int32, offset int64) (Consumer, error) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	return &Consumer{
+	return &consumer{
 		conn:           conn,
 		w:              bufio.NewWriter(conn),
 		topic:          topic,
@@ -36,7 +49,7 @@ func NewConsumer(addr, groupID, topic string, partitionIndex int32, offset int64
 	}, nil
 }
 
-func (c *Consumer) Poll() (key []byte, value []byte, atOffset int64, err error) {
+func (c *consumer) Poll() (key []byte, value []byte, atOffset int64, err error) {
 	payload := core.ConsumeRequest{
 		GroupId:        c.groupID,
 		Topic:          c.topic,
@@ -78,7 +91,7 @@ func (c *Consumer) Poll() (key []byte, value []byte, atOffset int64, err error) 
 	return cResp.Key, cResp.Value, atOffset, nil
 }
 
-func (c *Consumer) CommitOffset(offset int64) error {
+func (c *consumer) CommitOffset(offset int64) error {
 	payload := core.CommitOffsetRequest{
 		GroupId:        c.groupID,
 		Topic:          c.topic,
@@ -107,7 +120,7 @@ func (c *Consumer) CommitOffset(offset int64) error {
 }
 
 // FetchOffset retrieves the current offset for the consumer and sets it
-func (c *Consumer) FetchOffset() (int64, error) {
+func (c *consumer) FetchOffset() (int64, error) {
 	payload := core.FetchOffsetRequest{
 		GroupId:        c.groupID,
 		Topic:          c.topic,
@@ -150,6 +163,6 @@ func (c *Consumer) FetchOffset() (int64, error) {
 	return fresp.Offset, nil
 }
 
-func (c *Consumer) Close() error {
+func (c *consumer) Close() error {
 	return c.conn.Close()
 }

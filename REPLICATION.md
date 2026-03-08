@@ -47,8 +47,8 @@ handleCreateTopic:
 
 ### Chapter 1.3 Client Discovery
 Clients can discover partition leadership via GetMetadata.
-- [ ] GetMetadata request/response: returns leader + replicas + ISR per partition
-- [ ] Producers use this to know which broker to send writes to (must be leader)
+- [x] GetMetadata request/response: returns leader + replicas (later with ISR) per partition
+- [x] Producers use this to know which broker to send writes to (must be leader)
 - [ ] Consumers use this to know which broker to read from
 
 ## Chapter 2: Log replication (leader → followers)

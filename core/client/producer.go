@@ -81,7 +81,7 @@ func (p *producer) connFor(brokerID int32) (net.Conn, *bufio.Writer, error) {
 		}
 		return conn, writer, nil
 	}
-	if int(brokerID) >= len(p.cfg.Brokers) {
+	if brokerID < 0 || int(brokerID) >= len(p.cfg.Brokers) {
 		return nil, nil, errors.New("illegal brokerID")
 	}
 	addr := p.cfg.Brokers[brokerID].Addr
@@ -94,7 +94,7 @@ func (p *producer) connFor(brokerID int32) (net.Conn, *bufio.Writer, error) {
 	return conn, p.writers[brokerID], nil
 }
 
-// SetupBootstrap connects to the bootstrap broker first for validation
+// ConnectBootstrap connects to the bootstrap broker first for validation
 func (p *producer) ConnectBootstrap() error {
 	if _, _, err := p.connFor(bootstrapBrokerID); err != nil {
 		return fmt.Errorf("failed to connect to bootstrap broker: %w", err)
@@ -116,7 +116,7 @@ func (p *producer) FetchTopicMetadata(brokerID int32, topic string) (*core.Topic
 	}
 
 	if err := writer.Flush(); err != nil {
-		return nil, fmt.Errorf("failed to flush consume request: %w", err)
+		return nil, fmt.Errorf("failed to flush metadata request: %w", err)
 	}
 
 	var (
