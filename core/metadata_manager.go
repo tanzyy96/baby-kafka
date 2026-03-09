@@ -36,6 +36,7 @@ type MetadataValue struct {
 	CreatedAt int64
 }
 
+// TopicMetadata stores information of which broker is leading/replicating which partitions for a given topic.
 type TopicMetadata struct {
 	Topic         string
 	NumPartitions int32

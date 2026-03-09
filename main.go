@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"strconv"
 
 	"baby-kafka/core"
 
@@ -13,9 +14,6 @@ import (
 )
 
 func main() {
-	fig := figure.NewFigure("babykafka", "rectangles", true)
-	fig.Print()
-
 	debug := flag.Bool("debug", false, "enable debug logs")
 	index := flag.Int("index", 0, "broker index")
 	datadir := flag.String("datadir", "", "path to data directory")
@@ -26,6 +24,9 @@ func main() {
 	if *debug {
 		log.SetLevel(log.DebugLevel)
 	}
+
+	fig := figure.NewFigure("babykafka: broker "+strconv.Itoa(*index), "rectangles", true)
+	fig.Print()
 
 	overrides := []core.Option{}
 	if *datadir != "" {

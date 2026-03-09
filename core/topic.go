@@ -98,6 +98,7 @@ func LoadTopics(basePath string, rolloverLimit int64) (map[string]*Topic, error)
 			continue
 		}
 		topics[t.Key] = t
+
 	}
 
 	return topics, nil

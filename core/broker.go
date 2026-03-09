@@ -25,7 +25,7 @@ type Broker interface {
 
 	GetTopicMetadata(topicName string) (*TopicMetadata, error)
 	BroadcastMetadata(topic string) error
-	UpdateMetadata(map[string]*TopicMetadata) error
+	InsertMetadata(map[string]*TopicMetadata) error
 }
 
 type broker struct {

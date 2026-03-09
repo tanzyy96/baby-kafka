@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"os"
+	"time"
 
 	"github.com/charmbracelet/log"
 )
@@ -16,6 +17,10 @@ type Config struct {
 	RolloverLimit     int64          `json:"rollover_limit"`
 	Brokers           []BrokerConfig `json:"brokers"`
 	ReplicationFactor int32          `json:"replication_factor"`
+	// Interval between messages consumed
+	MessageDelay time.Duration `json:"message_delay"`
+	// Interval when no messages are consumed
+	MessageSleep time.Duration `json:"message_sleep"`
 }
 
 // BrokerConfig contains information on the other brokers/servers in the cluster

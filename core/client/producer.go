@@ -33,15 +33,15 @@ type producer struct {
 	metadata map[string]*core.TopicMetadata
 }
 
-type Option func(*producer)
+type ProducerOption func(*producer)
 
-func WithDialFn(fn func(addr string) (net.Conn, error)) Option {
+func WithProducerDialFn(fn func(addr string) (net.Conn, error)) ProducerOption {
 	return func(p *producer) {
 		p.dialFn = fn
 	}
 }
 
-func NewProducer(cfg *core.Config, opts ...Option) (Producer, error) {
+func NewProducer(cfg *core.Config, opts ...ProducerOption) (Producer, error) {
 	brokerConn := make(map[int32]net.Conn)
 	writers := make(map[int32]*bufio.Writer)
 	metadata := make(map[string]*core.TopicMetadata)

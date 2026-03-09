@@ -1,10 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
-	"sync"
-	"time"
+	"fmt"
+	"math/rand"
+	"os"
+	"os/signal"
+	"strconv"
+	"strings"
+	"syscall"
 
 	"baby-kafka/core"
 	"baby-kafka/core/client"
@@ -15,44 +21,43 @@ import (
 func main() {
 	cfg := core.LoadConfig()
 
-	count := flag.Int("count", 1, "number of consumers")
 	topic := flag.String("topic", "test", "topic")
-	partition := flag.Int("partition", 0, "partition")
-	groupId := flag.String("group", "testGroup", "consumer group id")
-
-	// TODO: consumer should precalculate the broker address based GetTopicMetadata + topic + partition
-	// Consumers only target one leader partition, so it needs to figure that out
-	// For now we hardcode the index
-	index := flag.Int("index", 0, "index of target broker")
+	partitions := flag.String("partitions", "0", "comma-separated list of partitions")
+	groupID := flag.String("group", "testGroup", "consumer group id")
+	debug := flag.Bool("debug", false, "enable debug logging")
 
 	flag.Parse()
 
-	wg := sync.WaitGroup{}
-
-	for i := 0; i < *count; i++ {
-		wg.Add(1)
-
-		go func(id int) {
-			if *index < 0 || *index >= len(cfg.Brokers) {
-				log.Fatalf("Invalid index %d for broker address list", *index)
-			}
-			port := cfg.Brokers[*index].Addr
-
-			defer wg.Done()
-			runConsumer(id, port, *groupId, *topic, int32(*partition))
-		}(i)
+	if *debug {
+		log.SetLevel(log.DebugLevel)
+		log.Info("Debug logging enabled")
 	}
 
-	wg.Wait()
+	partitionList := strings.Split(*partitions, ",")
+	partitionIDs := make([]int32, len(partitionList))
+
+	for i, p := range partitionList {
+		id, err := strconv.ParseInt(p, 10, 32)
+		if err != nil {
+			log.Fatalf("Invalid partition ID: %s", p)
+		}
+		partitionIDs[i] = int32(id)
+	}
+
+	// Random id
+	id := int(rand.Int31n(1000))
+
+	runConsumer(id, cfg, *groupID, *topic, partitionIDs)
 }
 
-func runConsumer(id int, addr, groupId, topic string, partition int32) {
-	c, err := client.NewConsumer(addr, groupId, topic, partition, 0)
+func runConsumer(id int, cfg *core.Config, groupID, topic string, partitionIDs []int32) {
+	consumerID := fmt.Sprintf("%s-%d", groupID, id)
+	c, err := client.NewConsumer(consumerID, cfg, groupID, topic, partitionIDs)
 	if err != nil {
 		log.Fatalf("Failed to create consumer %d: %s", id, err)
 	}
 
-	offset, err := c.FetchOffset()
+	offsets, err := c.FetchAllOffsets()
 	if err != nil {
 		if errors.Is(err, core.ErrOffsetNotFound) {
 			log.Info("No prior offset found.")
@@ -61,24 +66,44 @@ func runConsumer(id int, addr, groupId, topic string, partition int32) {
 		}
 	}
 
-	log.Infof("Resuming from offset: %d", offset)
+	for partitionIndex, offset := range offsets {
+		broker, err := c.BrokerFor(partitionIndex)
+		if err != nil {
+			log.Warnf("Failed to get broker for partition %d: %s", partitionIndex, err.Error())
+			continue
+		}
+		log.Info("Resuming offset", "partitionIndex", partitionIndex, "offset", offset, "broker", broker)
+	}
+
+	// Setup channel to receive messsages
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	resultCh := c.Run(ctx)
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	for {
-		log.Info("Polling...", "id", id, "groupId", groupId, "topic", topic, "partition", partition)
-		key, value, offset, err := c.Poll()
-		if err != nil {
-			if errors.Is(err, core.ErrNoMessagesAtOffset) {
-				time.Sleep(3 * time.Second) // Backoff before polling again
-				continue                    // No messages, just poll again
+		select {
+		case result := <-resultCh:
+			errMsg := ""
+			if result.Err == nil {
+				log.Info("Consumer received message", "id", id, "topic", topic, "partition", result.PartitionIndex, "offset", result.Offset, "key", string(result.Key), "value", string(result.Value), "err", errMsg)
+
+				if err := c.CommitOffset(result.PartitionIndex, result.Offset); err != nil {
+					log.Warn("Consumer failed to commit offset", "error", err)
+				}
+				log.Info("Committed offset", "offset", result.Offset)
 			} else {
-				log.Warnf("Consumer %d failed to poll: %s", id, err)
+				errMsg = result.Err.Error()
+				log.Warn("Consumer failed to receive message", "error", errMsg)
 			}
+
+		case <-quit:
+			cancel()
+			c.Close()
+			return
 		}
-		log.Info("Consumer received message", "id", id, "partition", partition, "offset", offset, "key", string(key), "value", string(value))
-		if err := c.CommitOffset(offset); err != nil {
-			log.Warn("Consumer failed to commit offset")
-		}
-		log.Info("Committed offset", "offset", offset)
-		time.Sleep(1 * time.Second)
 	}
 }

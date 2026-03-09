@@ -36,7 +36,7 @@ const (
 
 type Server struct {
 	listener   *net.Listener
-	broker     *Broker
+	broker     Broker
 	numClients atomic.Int32
 }
 
