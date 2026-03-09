@@ -7,6 +7,7 @@ Usage:
     python3 scripts/review_hook.py insert <json_file> [config_file]   # insert FIXME comments
 """
 
+import re
 import sys
 import json
 import os
@@ -78,7 +79,12 @@ def insert(data, cfg):
             target_line = lines[linenum - 1] if linenum - 1 < len(lines) else ""
             indentation = target_line[: len(target_line) - len(target_line.lstrip())]
             label = f'{item["severity"].upper()} {item["category"].upper()}'
-            lines.insert(linenum - 1, f"{indentation}{prefix} FIXME [{label}]: {item['fixme_comment']}\n")
+            comment = item["fixme_comment"].strip()
+            # Strip leading comment prefix (// or #) the model may have included
+            comment = re.sub(r"^(//|#)\s*", "", comment)
+            # Strip any leading FIXME: the model may have included
+            comment = re.sub(r"^FIXME\s*[:\-]?\s*", "", comment, flags=re.IGNORECASE)
+            lines.insert(linenum - 1, f"{indentation}{prefix} FIXME [{label}]: {comment}\n")
             print(f"  {filepath}:{linenum}: [{label}] {item['fixme_comment']}")
         with open(filepath, "w") as f:
             f.writelines(lines)
