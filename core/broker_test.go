@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestBroker(t *testing.T) *core.Broker {
+func newTestBroker(t *testing.T) core.Broker {
 	dir, err := os.MkdirTemp("", "testLogDir")
 	require.NoError(t, err)
 

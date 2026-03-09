@@ -23,6 +23,15 @@ func newTestProducer(t *testing.T, addr string) client.Producer {
 	return p
 }
 
+func newTestConsumer(t *testing.T, addr, groupID, topic string, partitions []int32) client.Consumer {
+	t.Helper()
+	cfg := &core.Config{Brokers: []core.BrokerConfig{{Index: 0, Addr: addr}}}
+	c, err := client.NewConsumer("test-consumer", cfg, groupID, topic, partitions)
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
 // startServer spins up a real server in a goroutine using the given data dir.
 // Cancels the context on t.Cleanup to shut it down.
 // TODO: support multiple brokers cuz consumers don't work with multiple brokers yet
@@ -95,27 +104,17 @@ func TestIntegration_CreateTopic_MultiplePartitions_MessagesRouteCorrectly(t *te
 
 	producer := newTestProducer(t, addr)
 
-	// Send messages with known keys and track expected partition per key
 	keys := []string{"alpha", "beta", "gamma", "delta"}
-	offsetPerPartition := make(map[int32]int64)
-
 	for _, key := range keys {
 		_, err := producer.Send("multi-topic", []byte(key), []byte("value-"+key))
 		require.NoError(t, err)
 	}
 
-	// Verify each key can be read from its expected partition
+	// Single consumer tracking offsets across all partitions
+	consumer := newTestConsumer(t, addr, "group1", "multi-topic", []int32{0, 1, 2})
 	for _, key := range keys {
 		partition := int32(utils.PartitionFor(key, numPartitions))
-		offset := offsetPerPartition[partition]
-		offsetPerPartition[partition]++
-
-		consumer, err := client.NewConsumer(addr, "group1", "multi-topic", partition, offset)
-		require.NoError(t, err)
-
-		k, v, _, err := consumer.Poll()
-		consumer.Close()
-
+		k, v, _, err := consumer.Poll(partition)
 		require.NoError(t, err)
 		assert.Equal(t, []byte(key), k)
 		assert.Equal(t, []byte("value-"+key), v)
@@ -181,15 +180,12 @@ func TestIntegration_ProduceAndConsume(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), resp.Offset)
 
-	consumer, err := client.NewConsumer(addr, "group1", "test-topic", 0, 0)
-	require.NoError(t, err)
-	defer consumer.Close()
+	consumer := newTestConsumer(t, addr, "group1", "test-topic", []int32{0})
 
-	key, value, atOffset, err := consumer.Poll()
+	key, value, _, err := consumer.Poll(0)
 	require.NoError(t, err)
 	assert.Equal(t, []byte("key1"), key)
 	assert.Equal(t, []byte("value1"), value)
-	assert.Equal(t, int64(0), atOffset)
 }
 
 func TestIntegration_MultipleMessages_InOrder(t *testing.T) {
@@ -210,16 +206,13 @@ func TestIntegration_MultipleMessages_InOrder(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	consumer, err := client.NewConsumer(addr, "group1", "ordered-topic", 0, 0)
-	require.NoError(t, err)
-	defer consumer.Close()
+	consumer := newTestConsumer(t, addr, "group1", "ordered-topic", []int32{0})
 
 	for i := range n {
-		key, value, atOffset, err := consumer.Poll()
+		key, value, _, err := consumer.Poll(0)
 		require.NoError(t, err)
-		assert.Equal(t, []byte(fmt.Sprintf("key%d", i)), key)
-		assert.Equal(t, []byte(fmt.Sprintf("msg%d", i)), value)
-		assert.Equal(t, int64(i), atOffset)
+		assert.Equal(t, fmt.Appendf(nil, "key%d", i), key)
+		assert.Equal(t, fmt.Appendf(nil, "msg%d", i), value)
 	}
 }
 
@@ -240,23 +233,25 @@ func TestIntegration_ConsumeFromMidOffset(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	consumer, err := client.NewConsumer(addr, "group1", "mid-offset-topic", 0, 3)
-	require.NoError(t, err)
-	defer consumer.Close()
+	consumer := newTestConsumer(t, addr, "group1", "mid-offset-topic", []int32{0})
 
-	key, value, atOffset, err := consumer.Poll()
+	// Discard messages 0, 1, 2
+	for i := 0; i < 3; i++ {
+		_, _, _, err := consumer.Poll(0)
+		require.NoError(t, err)
+	}
+
+	key, value, _, err := consumer.Poll(0)
 	require.NoError(t, err)
 	assert.Equal(t, []byte("k3"), key)
 	assert.Equal(t, []byte("v3"), value)
-	assert.Equal(t, int64(3), atOffset)
 
-	key, value, atOffset, err = consumer.Poll()
+	key, value, _, err = consumer.Poll(0)
 	require.NoError(t, err)
 	assert.Equal(t, []byte("k4"), key)
 	assert.Equal(t, []byte("v4"), value)
-	assert.Equal(t, int64(4), atOffset)
 
-	_, _, _, err = consumer.Poll()
+	_, _, _, err = consumer.Poll(0)
 	assert.ErrorIs(t, err, core.ErrNoMessagesAtOffset)
 }
 
@@ -302,12 +297,9 @@ func TestIntegration_BrokerRestart(t *testing.T) {
 	// --- Server B (same data dir) ---
 	addrB := startServer(t, dir)
 
-	consumer, err := client.NewConsumer(addrB, "group1", "durable-topic", 0, 0)
-	require.NoError(t, err)
-	defer consumer.Close()
-
+	consumer := newTestConsumer(t, addrB, "group1", "durable-topic", []int32{0})
 	for i := 0; i < 3; i++ {
-		key, value, _, err := consumer.Poll()
+		key, value, _, err := consumer.Poll(0)
 		require.NoError(t, err)
 		assert.Equal(t, []byte(fmt.Sprintf("k%d", i)), key)
 		assert.Equal(t, []byte(fmt.Sprintf("v%d", i)), value)
