@@ -84,7 +84,7 @@ def insert(data, cfg):
             comment = re.sub(r"^(//|#)\s*", "", comment)
             # Strip any leading FIXME: the model may have included
             comment = re.sub(r"^FIXME\s*[:\-]?\s*", "", comment, flags=re.IGNORECASE)
-            lines.insert(linenum - 1, f"{indentation}{prefix} FIXME [{label}]: {comment}\n")
+            lines.insert(linenum - 1, f"{indentation}{prefix} FIXME: [{label}] {comment}\n")
             print(f"  {filepath}:{linenum}: [{label}] {item['fixme_comment']}")
         with open(filepath, "w") as f:
             f.writelines(lines)

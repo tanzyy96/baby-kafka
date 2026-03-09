@@ -49,8 +49,9 @@ type consumer struct {
 	topic   string
 	offsets map[int32]int64
 
-	offsetLock sync.Mutex   // Lock for offsets map
-	connLock   sync.RWMutex // Lock for brokerConn and writers maps
+	metadataLock sync.RWMutex
+	offsetLock   sync.Mutex // Lock for offsets map
+	connLock     sync.Mutex // Lock for brokerConn and writers maps
 }
 
 type PollResult struct {
@@ -147,16 +148,15 @@ func (c *consumer) PartitionIDs() []int32 {
 }
 
 func (c *consumer) connFor(brokerID int32) (net.Conn, *bufio.Writer, error) {
-	c.connLock.RLock()
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
 	if conn, ok := c.brokerConn[brokerID]; ok {
-		defer c.connLock.RUnlock()
 		writer, wOk := c.writers[brokerID]
 		if !wOk {
 			return nil, nil, errors.New("connection found but writer missing")
 		}
 		return conn, writer, nil
 	}
-	c.connLock.RUnlock()
 	if brokerID < 0 || int(brokerID) >= len(c.cfg.Brokers) {
 		return nil, nil, errors.New("illegal brokerID")
 	}
@@ -165,9 +165,6 @@ func (c *consumer) connFor(brokerID int32) (net.Conn, *bufio.Writer, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-
-	c.connLock.Lock()
-	defer c.connLock.Unlock()
 
 	c.brokerConn[brokerID] = conn
 	c.writers[brokerID] = bufio.NewWriter(conn)
@@ -210,6 +207,8 @@ func (c *consumer) fetchTopicMetadata(brokerID int32, topic string) (*core.Topic
 	}
 
 	// set metadata and partition index
+	c.metadataLock.Lock()
+	defer c.metadataLock.Unlock()
 	c.metadata = mResp.Metadata
 	log.Info("Loaded topic metadata", "topic", topic)
 
@@ -217,6 +216,9 @@ func (c *consumer) fetchTopicMetadata(brokerID int32, topic string) (*core.Topic
 }
 
 func (c *consumer) brokerWithLeaderPartition(topic string, partitionID int32) (int32, error) {
+	c.metadataLock.RLock()
+	defer c.metadataLock.RUnlock()
+
 	for _, partition := range c.metadata.PartitionMetadata {
 		if partition.PartitionIndex == partitionID {
 			return partition.Leader, nil
@@ -227,7 +229,10 @@ func (c *consumer) brokerWithLeaderPartition(topic string, partitionID int32) (i
 
 func (c *consumer) getConnection(partitionIndex int32) (conn net.Conn, writer *bufio.Writer, brokerID int32, err error) {
 	// If topic metadata is not available, fetch it
-	if c.metadata == nil {
+	c.metadataLock.RLock()
+	currentMetadata := c.metadata
+	c.metadataLock.RUnlock()
+	if currentMetadata == nil {
 		if _, err := c.fetchTopicMetadata(bootstrapBrokerID, c.topic); err != nil {
 			// return nil, nil, atOffset, fmt.Errorf("failed to fetch topic metadata: %w", err)
 			return nil, nil, -1, fmt.Errorf("failed to fetch topic metadata: %w", err)
