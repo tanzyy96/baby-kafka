@@ -49,8 +49,8 @@ type consumer struct {
 	topic   string
 	offsets map[int32]int64
 
-	// Lock to protect writes to offsets
-	offsetLock sync.Mutex
+	offsetLock sync.Mutex   // Lock for offsets map
+	connLock   sync.RWMutex // Lock for brokerConn and writers maps
 }
 
 type PollResult struct {
@@ -115,7 +115,12 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 						}
 					}
 
-					resultChan <- PollResult{PartitionIndex: partitionIndex, Key: key, Value: value, Offset: atOffset, Err: err}
+					// Select allows us to exit early if the context is done
+					select {
+					case resultChan <- PollResult{PartitionIndex: partitionIndex, Key: key, Value: value, Offset: atOffset, Err: err}:
+					case <-ctx.Done():
+						return
+					}
 
 					// TODO: check against config
 					time.Sleep(1 * time.Second)
@@ -142,13 +147,16 @@ func (c *consumer) PartitionIDs() []int32 {
 }
 
 func (c *consumer) connFor(brokerID int32) (net.Conn, *bufio.Writer, error) {
+	c.connLock.RLock()
 	if conn, ok := c.brokerConn[brokerID]; ok {
+		defer c.connLock.RUnlock()
 		writer, wOk := c.writers[brokerID]
 		if !wOk {
 			return nil, nil, errors.New("connection found but writer missing")
 		}
 		return conn, writer, nil
 	}
+	c.connLock.RUnlock()
 	if brokerID < 0 || int(brokerID) >= len(c.cfg.Brokers) {
 		return nil, nil, errors.New("illegal brokerID")
 	}
@@ -157,8 +165,13 @@ func (c *consumer) connFor(brokerID int32) (net.Conn, *bufio.Writer, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
+
 	c.brokerConn[brokerID] = conn
 	c.writers[brokerID] = bufio.NewWriter(conn)
+
 	return conn, c.writers[brokerID], nil
 }
 
@@ -234,13 +247,13 @@ func (c *consumer) getConnection(partitionIndex int32) (conn net.Conn, writer *b
 	return conn, writer, brokerID, nil
 }
 
-// Based on the partitions we're supposed
 func (c *consumer) PollAll() map[int32]PollResult {
 	result := make(map[int32]PollResult)
 	for _, partitionIndex := range c.PartitionIDs() {
 		key, value, atOffset, err := c.Poll(partitionIndex)
 		if err != nil {
 			result[partitionIndex] = PollResult{Err: err}
+			continue
 		}
 		result[partitionIndex] = PollResult{Key: key, Value: value, Offset: atOffset}
 	}
@@ -248,9 +261,6 @@ func (c *consumer) PollAll() map[int32]PollResult {
 }
 
 func (c *consumer) Poll(partitionIndex int32) (key []byte, value []byte, atOffset int64, err error) {
-	c.offsetLock.Lock()
-	defer c.offsetLock.Unlock()
-
 	conn, writer, _, err := c.getConnection(partitionIndex)
 	if err != nil {
 		return nil, nil, -1, fmt.Errorf("failed to get connection for partition %d: %w", partitionIndex, err)
@@ -262,11 +272,13 @@ func (c *consumer) Poll(partitionIndex int32) (key []byte, value []byte, atOffse
 		PartitionIndex: partitionIndex,
 	}
 
+	c.offsetLock.Lock()
 	atOffset, ok := c.offsets[partitionIndex]
 	if !ok {
 		atOffset = 0
 		c.offsets[partitionIndex] = atOffset
 	}
+	c.offsetLock.Unlock()
 	payload.Offset = atOffset
 
 	if err := proto.WriteRequest(writer, core.MessageTypeConsume, payload); err != nil {
@@ -298,7 +310,11 @@ func (c *consumer) Poll(partitionIndex int32) (key []byte, value []byte, atOffse
 	}
 
 	atOffset++
+
+	c.offsetLock.Lock()
 	c.offsets[partitionIndex] = atOffset
+	c.offsetLock.Unlock()
+
 	return cResp.Key, cResp.Value, atOffset, nil
 }
 
@@ -392,7 +408,9 @@ func (c *consumer) FetchOffset(partitionIndex int32) (int64, error) {
 		return 0, fmt.Errorf("failed to decode fetchOffset.data: %w", err)
 	}
 
+	c.offsetLock.Lock()
 	c.offsets[partitionIndex] = fresp.Offset
+	c.offsetLock.Unlock()
 
 	return fresp.Offset, nil
 }
