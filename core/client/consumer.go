@@ -127,11 +127,11 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 							continue
 						} else {
 							// Exponential decay delay up to maxDelay
-							time.Sleep(delay)
 							double := delay * 2
 							delay = min(double, maxDelay)
-							continue
 						}
+					} else {
+						delay = time.Second
 					}
 
 					// Select allows us to exit early if the context is done
@@ -142,8 +142,7 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 					}
 
 					// TODO: check against config
-					time.Sleep(1 * time.Second)
-					delay = time.Second
+					time.Sleep(delay)
 				}
 			}
 		}(partitionIndex)
@@ -180,6 +179,8 @@ func (c *consumer) connForBootstrap() (net.Conn, *bufio.Writer, error) {
 }
 
 func (c *consumer) PartitionIDs() []int32 {
+	c.offsetMtx.Lock()
+	defer c.offsetMtx.Unlock()
 	res := []int32{}
 	for partitionIndex := range c.offsets {
 		res = append(res, partitionIndex)
@@ -215,7 +216,8 @@ func (c *consumer) connFor(partitionID int32) (net.Conn, *bufio.Writer, error) {
 }
 
 func (c *consumer) fetchTopicMetadata(topic string) (*core.TopicMetadata, error) {
-	// Locking throughout the full network request to avoid multiple goroutines firing fetchTopicMetadata on startup. More blocking but acceptable.
+	// NOTE: Locking throughout the full network request to avoid multiple goroutines firing fetchTopicMetadata on startup. More blocking but acceptable.
+	// This will also mean that a slow network I/O will block pretty much all other functionalities, but thats okay for our implementation since we must always fetchTopicMetadata before doing other stuff.
 	c.metaMtx.Lock()
 	defer c.metaMtx.Unlock()
 
@@ -368,10 +370,8 @@ func (c *consumer) Poll(partitionIndex int32) (key []byte, value []byte, atOffse
 		return nil, nil, atOffset, fmt.Errorf("failed to decode response.Data: %w", err)
 	}
 
-	atOffset++
-
 	c.offsetMtx.Lock()
-	c.offsets[partitionIndex] = atOffset
+	c.offsets[partitionIndex] = atOffset + 1
 	c.offsetMtx.Unlock()
 
 	return cResp.Key, cResp.Value, atOffset, nil
