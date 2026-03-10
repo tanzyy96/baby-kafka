@@ -130,6 +130,7 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 							time.Sleep(delay)
 							double := delay * 2
 							delay = min(double, maxDelay)
+							continue
 						}
 					}
 
@@ -142,6 +143,7 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 
 					// TODO: check against config
 					time.Sleep(1 * time.Second)
+					delay = time.Second
 				}
 			}
 		}(partitionIndex)
@@ -213,7 +215,7 @@ func (c *consumer) connFor(partitionID int32) (net.Conn, *bufio.Writer, error) {
 }
 
 func (c *consumer) fetchTopicMetadata(topic string) (*core.TopicMetadata, error) {
-	// Full lock, causes fetchTopicMetadata calls at startup to run sequentially. Acceptable behavior, good to know this is happening.
+	// Locking throughout the full network request to avoid multiple goroutines firing fetchTopicMetadata on startup. More blocking but acceptable.
 	c.metaMtx.Lock()
 	defer c.metaMtx.Unlock()
 
@@ -263,7 +265,6 @@ func (c *consumer) fetchTopicMetadata(topic string) (*core.TopicMetadata, error)
 }
 
 // brokerWithLeaderPartition returns the broker ID for the leader of the given partition.
-// FIXME: [CRITICAL BUG] brokerWithLeaderPartition must nil-check c.metadata before dereferencing; getConnection must also re-verify c.metadata != nil after metaOnce.Do completes, since the closure may have been a no-op (Once already exhausted by a prior failure), and return a clear error rather than proceeding with nil metadata
 func (c *consumer) brokerWithLeaderPartition(topic string, partitionID int32) (int32, error) {
 	c.metaMtx.RLock()
 	defer c.metaMtx.RUnlock()
@@ -297,7 +298,7 @@ func (c *consumer) getConnection(partitionIndex int32) (conn net.Conn, writer *b
 	if err != nil {
 		return nil, nil, -1, fmt.Errorf("failed to find broker for partition %d: %w", partitionIndex, err)
 	}
-	conn, writer, err = c.connFor(brokerID)
+	conn, writer, err = c.connFor(partitionIndex)
 	if err != nil {
 		return nil, nil, -1, fmt.Errorf("failed to get connection for broker %d: %w", brokerID, err)
 	}
