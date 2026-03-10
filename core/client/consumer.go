@@ -58,10 +58,9 @@ type consumer struct {
 	topic   string
 	offsets map[int32]int64
 
-	metaOnce   sync.Once // Ensure metadata is fetched only once across goroutines
-	metaLock   sync.RWMutex
-	offsetLock sync.Mutex // Lock for offsets map
-	connLock   sync.Mutex // Lock for brokerConn and writers maps
+	metaMtx   sync.RWMutex // Lock for metadata map
+	offsetMtx sync.Mutex   // Lock for offsets map
+	connMtx   sync.Mutex   // Lock for brokerConn and writers maps
 }
 
 type PollResult struct {
@@ -111,6 +110,9 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 	// For each partition, start a goroutine that constantly polls
 	for _, partitionIndex := range c.PartitionIDs() {
 		go func(partitionIndex int32) {
+			delay := time.Second
+			maxDelay := 30 * time.Second
+
 			for {
 				select {
 				case <-ctx.Done():
@@ -123,6 +125,11 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 							// TODO: check against config
 							time.Sleep(3 * time.Second)
 							continue
+						} else {
+							// Exponential decay delay up to maxDelay
+							time.Sleep(delay)
+							double := delay * 2
+							delay = min(double, maxDelay)
 						}
 					}
 
@@ -152,8 +159,8 @@ func (c *consumer) ConnectBootstrap() error {
 // connForBootstrap returns the connection to broker 0, dialing it if not yet established.
 // Used only for the initial metadata fetch before partition→broker mapping is known.
 func (c *consumer) connForBootstrap() (net.Conn, *bufio.Writer, error) {
-	c.connLock.Lock()
-	defer c.connLock.Unlock()
+	c.connMtx.Lock()
+	defer c.connMtx.Unlock()
 	if c.bootstrapConn != nil {
 		return c.bootstrapConn, c.bootstrapWriter, nil
 	}
@@ -179,18 +186,19 @@ func (c *consumer) PartitionIDs() []int32 {
 }
 
 func (c *consumer) connFor(partitionID int32) (net.Conn, *bufio.Writer, error) {
-	c.connLock.Lock()
-	defer c.connLock.Unlock()
+	brokerID, err := c.BrokerFor(partitionID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	c.connMtx.Lock()
+	defer c.connMtx.Unlock()
 	if conn, ok := c.partitionConn[partitionID]; ok {
 		writer, wOk := c.writers[partitionID]
 		if !wOk {
 			return nil, nil, errors.New("connection found but writer missing")
 		}
 		return conn, writer, nil
-	}
-	brokerID, err := c.BrokerFor(partitionID)
-	if err != nil {
-		return nil, nil, err
 	}
 	addr := c.cfg.Brokers[brokerID].Addr
 	conn, err := c.dialFn(addr)
@@ -205,6 +213,15 @@ func (c *consumer) connFor(partitionID int32) (net.Conn, *bufio.Writer, error) {
 }
 
 func (c *consumer) fetchTopicMetadata(topic string) (*core.TopicMetadata, error) {
+	// Full lock, causes fetchTopicMetadata calls at startup to run sequentially. Acceptable behavior, good to know this is happening.
+	c.metaMtx.Lock()
+	defer c.metaMtx.Unlock()
+
+	// In case of multiple fetches waiting in sequence, we want to do away with the subsequent fetchTopicMetadata after the first one completes
+	if c.metadata != nil {
+		return c.metadata, nil
+	}
+
 	conn, writer, err := c.connForBootstrap()
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetchTopicMetadata: %w", err)
@@ -239,8 +256,6 @@ func (c *consumer) fetchTopicMetadata(topic string) (*core.TopicMetadata, error)
 	}
 
 	// set metadata and partition index
-	c.metaLock.Lock()
-	defer c.metaLock.Unlock()
 	c.metadata = mResp.Metadata
 	log.Info("Loaded topic metadata", "topic", topic)
 
@@ -248,10 +263,14 @@ func (c *consumer) fetchTopicMetadata(topic string) (*core.TopicMetadata, error)
 }
 
 // brokerWithLeaderPartition returns the broker ID for the leader of the given partition.
+// FIXME: [CRITICAL BUG] brokerWithLeaderPartition must nil-check c.metadata before dereferencing; getConnection must also re-verify c.metadata != nil after metaOnce.Do completes, since the closure may have been a no-op (Once already exhausted by a prior failure), and return a clear error rather than proceeding with nil metadata
 func (c *consumer) brokerWithLeaderPartition(topic string, partitionID int32) (int32, error) {
-	c.metaLock.RLock()
-	defer c.metaLock.RUnlock()
+	c.metaMtx.RLock()
+	defer c.metaMtx.RUnlock()
 
+	if c.metadata == nil {
+		return -1, fmt.Errorf("metadata not loaded")
+	}
 	for _, partition := range c.metadata.PartitionMetadata {
 		if partition.PartitionIndex == partitionID {
 			return partition.Leader, nil
@@ -262,19 +281,15 @@ func (c *consumer) brokerWithLeaderPartition(topic string, partitionID int32) (i
 
 func (c *consumer) getConnection(partitionIndex int32) (conn net.Conn, writer *bufio.Writer, brokerID int32, err error) {
 	// If topic metadata is not available, fetch it
-	c.metaLock.RLock()
+	c.metaMtx.RLock()
 	metadataLoaded := c.metadata != nil
-	c.metaLock.RUnlock()
-
+	c.metaMtx.RUnlock()
 	if !metadataLoaded {
-		var err error
-		// Use a sync.Once to ensure only one goroutine fetches metadata
-		c.metaOnce.Do(func() {
-			_, err = c.fetchTopicMetadata(c.topic)
-		})
+		_, err = c.fetchTopicMetadata(c.topic)
 		if err != nil {
 			return nil, nil, -1, fmt.Errorf("failed to fetch topic metadata: %w", err)
 		}
+
 	}
 
 	// Get the brokerID and then the corresponding connection for partition
@@ -315,13 +330,13 @@ func (c *consumer) Poll(partitionIndex int32) (key []byte, value []byte, atOffse
 		PartitionIndex: partitionIndex,
 	}
 
-	c.offsetLock.Lock()
+	c.offsetMtx.Lock()
 	atOffset, ok := c.offsets[partitionIndex]
 	if !ok {
 		atOffset = 0
 		c.offsets[partitionIndex] = atOffset
 	}
-	c.offsetLock.Unlock()
+	c.offsetMtx.Unlock()
 	payload.Offset = atOffset
 
 	if err := proto.WriteRequest(writer, core.MessageTypeConsume, payload); err != nil {
@@ -354,9 +369,9 @@ func (c *consumer) Poll(partitionIndex int32) (key []byte, value []byte, atOffse
 
 	atOffset++
 
-	c.offsetLock.Lock()
+	c.offsetMtx.Lock()
 	c.offsets[partitionIndex] = atOffset
-	c.offsetLock.Unlock()
+	c.offsetMtx.Unlock()
 
 	return cResp.Key, cResp.Value, atOffset, nil
 }
@@ -455,16 +470,16 @@ func (c *consumer) FetchOffset(partitionIndex int32) (int64, error) {
 		return 0, fmt.Errorf("failed to decode fetchOffset.data: %w", err)
 	}
 
-	c.offsetLock.Lock()
+	c.offsetMtx.Lock()
 	c.offsets[partitionIndex] = fresp.Offset
-	c.offsetLock.Unlock()
+	c.offsetMtx.Unlock()
 
 	return fresp.Offset, nil
 }
 
 func (c *consumer) BrokerFor(partitionIndex int32) (int32, error) {
-	c.metaLock.RLock()
-	defer c.metaLock.RUnlock()
+	c.metaMtx.RLock()
+	defer c.metaMtx.RUnlock()
 	if c.metadata == nil {
 		return -1, fmt.Errorf("metadata not loaded")
 	}
@@ -475,7 +490,6 @@ func (c *consumer) BrokerFor(partitionIndex int32) (int32, error) {
 	}
 	return -1, fmt.Errorf("no partition leader found for partition %d", partitionIndex)
 }
-
 
 func (c *consumer) Close() error {
 	for _, conn := range c.partitionConn {
