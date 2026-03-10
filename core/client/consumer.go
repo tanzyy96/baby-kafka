@@ -36,11 +36,20 @@ type Consumer interface {
 }
 
 type consumer struct {
-	id         string
-	dialFn     func(addr string) (net.Conn, error)
-	cfg        *core.Config
-	brokerConn map[int32]net.Conn
-	writers    map[int32]*bufio.Writer
+	id      string
+	dialFn  func(addr string) (net.Conn, error)
+	cfg     *core.Config
+	writers map[int32]*bufio.Writer
+
+	// Map of partition IDs to connections.
+	//
+	// WHY: We need to ensure one connection per partition, so that two goroutines, each for a different partition, don't try to share a connection. That would cause bytes to interleave.
+	//
+	partitionConn map[int32]net.Conn // Map of partition IDs to connections
+
+	// Single connection to the bootstrap broker, used only to fetch topic metadata.
+	bootstrapConn   net.Conn
+	bootstrapWriter *bufio.Writer
 
 	metadata *core.TopicMetadata
 
@@ -49,9 +58,10 @@ type consumer struct {
 	topic   string
 	offsets map[int32]int64
 
-	metadataLock sync.RWMutex
-	offsetLock   sync.Mutex // Lock for offsets map
-	connLock     sync.Mutex // Lock for brokerConn and writers maps
+	metaOnce   sync.Once // Ensure metadata is fetched only once across goroutines
+	metaLock   sync.RWMutex
+	offsetLock sync.Mutex // Lock for offsets map
+	connLock   sync.Mutex // Lock for brokerConn and writers maps
 }
 
 type PollResult struct {
@@ -80,14 +90,14 @@ func NewConsumer(id string, cfg *core.Config, groupID, topic string, partitionIn
 	}
 
 	c := &consumer{
-		id:         id,
-		dialFn:     dialFn,
-		cfg:        cfg,
-		brokerConn: map[int32]net.Conn{},
-		writers:    map[int32]*bufio.Writer{},
-		groupID:    groupID,
-		topic:      topic,
-		offsets:    offsets,
+		id:            id,
+		dialFn:        dialFn,
+		cfg:           cfg,
+		partitionConn: map[int32]net.Conn{},
+		writers:       map[int32]*bufio.Writer{},
+		groupID:       groupID,
+		topic:         topic,
+		offsets:       offsets,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -133,10 +143,31 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 }
 
 func (c *consumer) ConnectBootstrap() error {
-	if _, _, err := c.connFor(bootstrapBrokerID); err != nil {
+	if _, _, err := c.connForBootstrap(); err != nil {
 		return fmt.Errorf("failed to connect to bootstrap broker: %w", err)
 	}
 	return nil
+}
+
+// connForBootstrap returns the connection to broker 0, dialing it if not yet established.
+// Used only for the initial metadata fetch before partition→broker mapping is known.
+func (c *consumer) connForBootstrap() (net.Conn, *bufio.Writer, error) {
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
+	if c.bootstrapConn != nil {
+		return c.bootstrapConn, c.bootstrapWriter, nil
+	}
+	if len(c.cfg.Brokers) == 0 {
+		return nil, nil, fmt.Errorf("no brokers configured")
+	}
+	addr := c.cfg.Brokers[bootstrapBrokerID].Addr
+	conn, err := c.dialFn(addr)
+	if err != nil {
+		return nil, nil, err
+	}
+	c.bootstrapConn = conn
+	c.bootstrapWriter = bufio.NewWriter(conn)
+	return c.bootstrapConn, c.bootstrapWriter, nil
 }
 
 func (c *consumer) PartitionIDs() []int32 {
@@ -147,18 +178,19 @@ func (c *consumer) PartitionIDs() []int32 {
 	return res
 }
 
-func (c *consumer) connFor(brokerID int32) (net.Conn, *bufio.Writer, error) {
+func (c *consumer) connFor(partitionID int32) (net.Conn, *bufio.Writer, error) {
 	c.connLock.Lock()
 	defer c.connLock.Unlock()
-	if conn, ok := c.brokerConn[brokerID]; ok {
-		writer, wOk := c.writers[brokerID]
+	if conn, ok := c.partitionConn[partitionID]; ok {
+		writer, wOk := c.writers[partitionID]
 		if !wOk {
 			return nil, nil, errors.New("connection found but writer missing")
 		}
 		return conn, writer, nil
 	}
-	if brokerID < 0 || int(brokerID) >= len(c.cfg.Brokers) {
-		return nil, nil, errors.New("illegal brokerID")
+	brokerID, err := c.BrokerFor(partitionID)
+	if err != nil {
+		return nil, nil, err
 	}
 	addr := c.cfg.Brokers[brokerID].Addr
 	conn, err := c.dialFn(addr)
@@ -166,14 +198,14 @@ func (c *consumer) connFor(brokerID int32) (net.Conn, *bufio.Writer, error) {
 		return nil, nil, err
 	}
 
-	c.brokerConn[brokerID] = conn
-	c.writers[brokerID] = bufio.NewWriter(conn)
+	c.partitionConn[partitionID] = conn
+	c.writers[partitionID] = bufio.NewWriter(conn)
 
-	return conn, c.writers[brokerID], nil
+	return conn, c.writers[partitionID], nil
 }
 
-func (c *consumer) fetchTopicMetadata(brokerID int32, topic string) (*core.TopicMetadata, error) {
-	conn, writer, err := c.connFor(brokerID)
+func (c *consumer) fetchTopicMetadata(topic string) (*core.TopicMetadata, error) {
+	conn, writer, err := c.connForBootstrap()
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetchTopicMetadata: %w", err)
 	}
@@ -207,17 +239,18 @@ func (c *consumer) fetchTopicMetadata(brokerID int32, topic string) (*core.Topic
 	}
 
 	// set metadata and partition index
-	c.metadataLock.Lock()
-	defer c.metadataLock.Unlock()
+	c.metaLock.Lock()
+	defer c.metaLock.Unlock()
 	c.metadata = mResp.Metadata
 	log.Info("Loaded topic metadata", "topic", topic)
 
 	return mResp.Metadata, nil
 }
 
+// brokerWithLeaderPartition returns the broker ID for the leader of the given partition.
 func (c *consumer) brokerWithLeaderPartition(topic string, partitionID int32) (int32, error) {
-	c.metadataLock.RLock()
-	defer c.metadataLock.RUnlock()
+	c.metaLock.RLock()
+	defer c.metaLock.RUnlock()
 
 	for _, partition := range c.metadata.PartitionMetadata {
 		if partition.PartitionIndex == partitionID {
@@ -229,12 +262,17 @@ func (c *consumer) brokerWithLeaderPartition(topic string, partitionID int32) (i
 
 func (c *consumer) getConnection(partitionIndex int32) (conn net.Conn, writer *bufio.Writer, brokerID int32, err error) {
 	// If topic metadata is not available, fetch it
-	c.metadataLock.RLock()
-	currentMetadata := c.metadata
-	c.metadataLock.RUnlock()
-	if currentMetadata == nil {
-		if _, err := c.fetchTopicMetadata(bootstrapBrokerID, c.topic); err != nil {
-			// return nil, nil, atOffset, fmt.Errorf("failed to fetch topic metadata: %w", err)
+	c.metaLock.RLock()
+	metadataLoaded := c.metadata != nil
+	c.metaLock.RUnlock()
+
+	if !metadataLoaded {
+		var err error
+		// Use a sync.Once to ensure only one goroutine fetches metadata
+		c.metaOnce.Do(func() {
+			_, err = c.fetchTopicMetadata(c.topic)
+		})
+		if err != nil {
 			return nil, nil, -1, fmt.Errorf("failed to fetch topic metadata: %w", err)
 		}
 	}
@@ -362,7 +400,11 @@ func (c *consumer) FetchAllOffsets() (map[int32]int64, error) {
 	for _, partitionIndex := range c.PartitionIDs() {
 		offset, err := c.FetchOffset(partitionIndex)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch offset for partition %d: %w", partitionIndex, err)
+			if errors.Is(err, core.ErrOffsetNotFound) {
+				offset = 0
+			} else {
+				return nil, fmt.Errorf("failed to fetch offset for partition %d: %w", partitionIndex, err)
+			}
 		}
 		result[partitionIndex] = offset
 	}
@@ -421,6 +463,8 @@ func (c *consumer) FetchOffset(partitionIndex int32) (int64, error) {
 }
 
 func (c *consumer) BrokerFor(partitionIndex int32) (int32, error) {
+	c.metaLock.RLock()
+	defer c.metaLock.RUnlock()
 	if c.metadata == nil {
 		return -1, fmt.Errorf("metadata not loaded")
 	}
@@ -432,10 +476,16 @@ func (c *consumer) BrokerFor(partitionIndex int32) (int32, error) {
 	return -1, fmt.Errorf("no partition leader found for partition %d", partitionIndex)
 }
 
+
 func (c *consumer) Close() error {
-	for _, conn := range c.brokerConn {
+	for _, conn := range c.partitionConn {
 		if err := conn.Close(); err != nil {
 			log.Warn("Failed to close connection", "err", err)
+		}
+	}
+	if c.bootstrapConn != nil {
+		if err := c.bootstrapConn.Close(); err != nil {
+			log.Warn("Failed to close bootstrap connection", "err", err)
 		}
 	}
 	return nil
