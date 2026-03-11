@@ -17,10 +17,16 @@ type Config struct {
 	RolloverLimit     int64          `json:"rollover_limit"`
 	Brokers           []BrokerConfig `json:"brokers"`
 	ReplicationFactor int32          `json:"replication_factor"`
-	// Interval between messages consumed
-	MessageDelay time.Duration `json:"message_delay"`
-	// Interval when no messages are consumed
-	MessageSleep time.Duration `json:"message_sleep"`
+	Consumer          ConsumerConfig `json:"consumer"`
+}
+
+type ConsumerConfig struct {
+	// Interval between polls for messages
+	PollInterval time.Duration `json:"poll_interval"`
+	// Sleep interval when no messages are consumed
+	SleepInterval time.Duration `json:"sleep_interval"`
+	// Maximum interval between errors for exponential backoff
+	MaxErrorInterval time.Duration `json:"max_error_interval"`
 }
 
 // BrokerConfig contains information on the other brokers/servers in the cluster
@@ -48,6 +54,11 @@ func DefaultConfig() *Config {
 			{Index: 1, Addr: ":8081"},
 		},
 		ReplicationFactor: 1,
+		Consumer: ConsumerConfig{
+			PollInterval:     1 * time.Second,
+			SleepInterval:    3 * time.Second,
+			MaxErrorInterval: 10 * time.Second,
+		},
 	}
 }
 
@@ -59,6 +70,8 @@ func LoadConfig(overrides ...Option) *Config {
 		generateDefaultConfigFile()
 		cfg = *DefaultConfig()
 	}
+
+	// TODO: Validation
 
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		log.Warn("Failed to parse config file, using default config:", err)

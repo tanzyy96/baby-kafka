@@ -107,42 +107,44 @@ func NewConsumer(id string, cfg *core.Config, groupID, topic string, partitionIn
 func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 	resultChan := make(chan PollResult, 100)
 
-	// For each partition, start a goroutine that constantly polls
+	// For each partition, start a goroutine that constantly polls and commits
 	for _, partitionIndex := range c.PartitionIDs() {
 		go func(partitionIndex int32) {
-			delay := time.Second
-			maxDelay := 30 * time.Second
-
+			errDelay := 1 * time.Second
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				default:
 					log.Debug("Polling partition", "partitionIndex", partitionIndex)
-					key, value, atOffset, err := c.Poll(partitionIndex)
-					if err != nil {
-						if errors.Is(err, core.ErrOffsetNotFound) {
-							// TODO: check against config
-							time.Sleep(3 * time.Second)
+					key, value, atOffset, pollErr := c.Poll(partitionIndex)
+
+					log.Debug("Received message", "partitionIndex", partitionIndex, "offset", atOffset)
+					if pollErr != nil {
+						if errors.Is(pollErr, core.ErrOffsetNotFound) {
+							log.Debug("Offset not found for partition, sleeping", "partitionIndex", partitionIndex)
+							time.Sleep(c.cfg.Consumer.SleepInterval * time.Second)
 							continue
 						} else {
-							// Exponential decay delay up to maxDelay
-							double := delay * 2
-							delay = min(double, maxDelay)
+							log.Warn("Failed to poll partition", "partitionIndex", partitionIndex, "err", pollErr)
 						}
-					} else {
-						delay = time.Second
+					}
+
+					if pollErr != nil {
+						if err := c.CommitOffset(partitionIndex, atOffset+1); err != nil {
+							log.Warn("Failed to commit offset", "partitionIndex", partitionIndex, "offset", atOffset+1, "err", err)
+						}
+						log.Info("Commited offset", "partitionIndex", partitionIndex, "offset", atOffset+1)
 					}
 
 					// Select allows us to exit early if the context is done
 					select {
-					case resultChan <- PollResult{PartitionIndex: partitionIndex, Key: key, Value: value, Offset: atOffset, Err: err}:
+					case resultChan <- PollResult{PartitionIndex: partitionIndex, Key: key, Value: value, Offset: atOffset, Err: pollErr}:
 					case <-ctx.Done():
 						return
 					}
 
-					// TODO: check against config
-					time.Sleep(delay)
+					c.SleepBetweenPolls(&errDelay, pollErr != nil)
 				}
 			}
 		}(partitionIndex)
@@ -324,6 +326,8 @@ func (c *consumer) PollAll() map[int32]PollResult {
 	return result
 }
 
+// Poll retrieves a message from the corresponding broker for the given partition.
+// Returns the key, value and current offset of the message.
 func (c *consumer) Poll(partitionIndex int32) (key []byte, value []byte, atOffset int64, err error) {
 	conn, writer, _, err := c.getConnection(partitionIndex)
 	if err != nil {
@@ -380,7 +384,9 @@ func (c *consumer) Poll(partitionIndex int32) (key []byte, value []byte, atOffse
 	return cResp.Key, cResp.Value, atOffset, nil
 }
 
-func (c *consumer) CommitOffset(partitionIndex int32, offset int64) error {
+// CommitOffset commits the next offset to read for the given partition.
+// Remember to do +1 before you pass it in here.
+func (c *consumer) CommitOffset(partitionIndex int32, nextOffset int64) error {
 	conn, writer, _, err := c.getConnection(partitionIndex)
 	if err != nil {
 		return fmt.Errorf("failed to get connection for partition %d: %w", partitionIndex, err)
@@ -390,7 +396,7 @@ func (c *consumer) CommitOffset(partitionIndex int32, offset int64) error {
 		GroupId:        c.groupID,
 		Topic:          c.topic,
 		PartitionIndex: partitionIndex,
-		Offset:         offset,
+		Offset:         nextOffset,
 	}
 
 	if err := proto.WriteRequest(writer, core.MessageTypeCommitOffset, payload); err != nil {
@@ -507,4 +513,19 @@ func (c *consumer) Close() error {
 		}
 	}
 	return nil
+}
+
+// SleepBetweenPolls sleeps for the configured interval, with exponential backoff on error
+func (c *consumer) SleepBetweenPolls(errDelay *time.Duration, hasError bool) {
+	if hasError {
+		time.Sleep(*errDelay)
+		if *errDelay*2 < c.cfg.Consumer.MaxErrorInterval {
+			*errDelay *= 2
+		} else {
+			*errDelay = c.cfg.Consumer.MaxErrorInterval
+		}
+	} else {
+		time.Sleep(c.cfg.Consumer.PollInterval * time.Second)
+		*errDelay = 1 * time.Second
+	}
 }
