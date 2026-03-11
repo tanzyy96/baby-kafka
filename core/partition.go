@@ -10,9 +10,7 @@ import (
 	"github.com/charmbracelet/log"
 )
 
-const MAX_SIZE int64 = 1000 // 1kb
-
-var ErrNoMessagesAtOffset = fmt.Errorf("no messages found at the given offset")
+const MaxSize int64 = 1000 // 1kb
 
 /*
 Partition is the grouping of log segments, and manages the rollover process.
@@ -50,7 +48,7 @@ func NewPartition(index int32, folderPath string, maxSize int64) (*Partition, er
 	log.Infof("Created partition %d at %s", index, partitionPath)
 
 	if maxSize == 0 {
-		maxSize = MAX_SIZE
+		maxSize = MaxSize
 	}
 
 	return &Partition{
@@ -159,7 +157,7 @@ func (p *Partition) ReadAt(offset int64) (*Message, error) {
 		}
 	}
 
-	return nil, ErrNoMessagesAtOffset
+	return nil, ErrOffsetNotFound
 }
 
 // Rollover creates a new log file and sets it as the active log. The old log is added to the logs array.

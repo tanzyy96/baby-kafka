@@ -252,7 +252,7 @@ func TestIntegration_ConsumeFromMidOffset(t *testing.T) {
 	assert.Equal(t, []byte("v4"), value)
 
 	_, _, _, err = consumer.Poll(0)
-	assert.ErrorIs(t, err, core.ErrNoMessagesAtOffset)
+	assert.ErrorIs(t, err, core.ErrOffsetNotFound)
 }
 
 func TestIntegration_BrokerRestart(t *testing.T) {

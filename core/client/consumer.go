@@ -121,7 +121,7 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 					log.Debug("Polling partition", "partitionIndex", partitionIndex)
 					key, value, atOffset, err := c.Poll(partitionIndex)
 					if err != nil {
-						if errors.Is(err, core.ErrNoMessagesAtOffset) {
+						if errors.Is(err, core.ErrOffsetNotFound) {
 							// TODO: check against config
 							time.Sleep(3 * time.Second)
 							continue
@@ -202,6 +202,9 @@ func (c *consumer) connFor(partitionID int32) (net.Conn, *bufio.Writer, error) {
 			return nil, nil, errors.New("connection found but writer missing")
 		}
 		return conn, writer, nil
+	}
+	if int(brokerID) >= len(c.cfg.Brokers) {
+		return nil, nil, errors.New("illegal broker ID: out of range")
 	}
 	addr := c.cfg.Brokers[brokerID].Addr
 	conn, err := c.dialFn(addr)
@@ -313,10 +316,10 @@ func (c *consumer) PollAll() map[int32]PollResult {
 	for _, partitionIndex := range c.PartitionIDs() {
 		key, value, atOffset, err := c.Poll(partitionIndex)
 		if err != nil {
-			result[partitionIndex] = PollResult{Err: err}
+			result[partitionIndex] = PollResult{PartitionIndex: partitionIndex, Err: err}
 			continue
 		}
-		result[partitionIndex] = PollResult{Key: key, Value: value, Offset: atOffset}
+		result[partitionIndex] = PollResult{PartitionIndex: partitionIndex, Key: key, Value: value, Offset: atOffset}
 	}
 	return result
 }
@@ -360,8 +363,8 @@ func (c *consumer) Poll(partitionIndex int32) (key []byte, value []byte, atOffse
 
 	if resp.Status != proto.StatusOK {
 		// Manual check
-		if strings.Contains(resp.Error, core.ErrNoMessagesAtOffset.Error()) {
-			return nil, nil, 0, core.ErrNoMessagesAtOffset
+		if strings.Contains(resp.Error, core.ErrOffsetNotFound.Error()) {
+			return nil, nil, 0, core.ErrOffsetNotFound
 		}
 		return nil, nil, atOffset, fmt.Errorf("consume request failed: %s", resp.Error)
 	}
@@ -416,6 +419,7 @@ func (c *consumer) FetchAllOffsets() (map[int32]int64, error) {
 	for _, partitionIndex := range c.PartitionIDs() {
 		offset, err := c.FetchOffset(partitionIndex)
 		if err != nil {
+			// No offset found, expecting brand new partition
 			if errors.Is(err, core.ErrOffsetNotFound) {
 				offset = 0
 			} else {
@@ -456,10 +460,7 @@ func (c *consumer) FetchOffset(partitionIndex int32) (int64, error) {
 
 	if resp.Status != proto.StatusOK {
 		// Manual check for expected errors that aren't systemic errors
-		// Currently exceeding the offset limit will return ErrNoMessagesAtOffset
-		if strings.Contains(resp.Error, core.ErrNoMessagesAtOffset.Error()) {
-			return 0, core.ErrNoMessagesAtOffset
-		}
+		// Currently exceeding the offset limit will return ErrOffsetNotFound
 		if strings.Contains(resp.Error, core.ErrOffsetNotFound.Error()) {
 			return 0, core.ErrOffsetNotFound
 		}
@@ -481,6 +482,7 @@ func (c *consumer) FetchOffset(partitionIndex int32) (int64, error) {
 func (c *consumer) BrokerFor(partitionIndex int32) (int32, error) {
 	c.metaMtx.RLock()
 	defer c.metaMtx.RUnlock()
+
 	if c.metadata == nil {
 		return -1, fmt.Errorf("metadata not loaded")
 	}
