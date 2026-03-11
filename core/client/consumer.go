@@ -421,6 +421,7 @@ func (c *consumer) FetchAllOffsets() (map[int32]int64, error) {
 		if err != nil {
 			// No offset found, expecting brand new partition
 			if errors.Is(err, core.ErrOffsetNotFound) {
+				log.Info("No offset found for partition, setting to 0", "partitionIndex", partitionIndex)
 				offset = 0
 			} else {
 				return nil, fmt.Errorf("failed to fetch offset for partition %d: %w", partitionIndex, err)

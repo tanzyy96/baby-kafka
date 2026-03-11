@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"testing"
 
+	"baby-kafka/core"
 	"baby-kafka/core/proto"
 
 	"github.com/stretchr/testify/require"
@@ -40,12 +41,23 @@ func TestHandleFetchOffset_GoodPayload(t *testing.T) {
 		Topic:          "my-topic",
 		PartitionIndex: 0,
 	})
+
+	// First request, no offset found
 	resp, err := s.handleFetchOffset(b)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, core.ErrOffsetNotFound)
 	decoded := decodeProtoResponse(t, resp)
 	require.Equal(t, proto.StatusOK, decoded.Status)
 
 	var req FetchOffsetResponse
+	err = decoded.DecodeData(&req)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), req.Offset)
+
+	resp, err = s.handleFetchOffset(b)
+	require.NoError(t, err)
+	decoded = decodeProtoResponse(t, resp)
+	require.Equal(t, proto.StatusOK, decoded.Status)
+
 	err = decoded.DecodeData(&req)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), req.Offset)
