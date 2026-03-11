@@ -1,20 +1,22 @@
-package core
+package core_test
 
 import (
 	"os"
 	"testing"
 
+	core "baby-kafka/core"
+
 	"github.com/stretchr/testify/require"
 )
 
-func newTestServer(t *testing.T) *Server {
+func newTestServer(t *testing.T) core.Server {
 	dir, err := os.MkdirTemp("", "babykafka_test")
 	require.NoError(t, err)
 
-	cfg := DefaultConfig()
+	cfg := core.DefaultConfig()
 	cfg.BasePath = dir
-	cfg.Brokers = []BrokerConfig{{Index: 0, Addr: ":0"}}
-	s, err := NewServer(cfg, 0)
+	cfg.Brokers = []core.BrokerConfig{{Index: 0, Addr: ":0"}}
+	s, err := core.NewServer(cfg, 0)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {

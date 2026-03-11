@@ -34,7 +34,13 @@ const (
 	MessageTypeBroadcastMetadata = 8
 )
 
-type Server struct {
+type Server interface {
+	Start(ctx context.Context) error
+	Addr() string
+	Stop() error
+}
+
+type server struct {
 	listener   *net.Listener
 	broker     Broker
 	numClients atomic.Int32
@@ -46,7 +52,7 @@ type Request struct{}
 // HAHA that sounds like docker-compose to Dockerfile
 
 // NewServer creates a new server instance.
-func NewServer(cfg *Config, brokerID int32) (*Server, error) {
+func NewServer(cfg *Config, brokerID int32) (Server, error) {
 	if brokerID < 0 || brokerID >= int32(len(cfg.Brokers)) {
 		return nil, fmt.Errorf("invalid broker index: %d", brokerID)
 	}
@@ -60,15 +66,15 @@ func NewServer(cfg *Config, brokerID int32) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create broker: %w", err)
 	}
-	log.Infof("Server %d started on %s", brokerID, n.Addr())
-	return &Server{
+	log.Infof("server %d started on %s", brokerID, n.Addr())
+	return &server{
 		listener: &n,
 		broker:   b,
 	}, nil
 }
 
-func (s *Server) Start(ctx context.Context) error {
-	log.Infof("Server started on %s, listening for connections...", s.Addr())
+func (s *server) Start(ctx context.Context) error {
+	log.Infof("server started on %s, listening for connections...", s.Addr())
 
 	wg := sync.WaitGroup{}
 
@@ -104,7 +110,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 }
 
-func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
+func (s *server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second)) // Set a read deadline to prevent hanging connections
 
@@ -162,10 +168,10 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	}
 }
 
-func (s *Server) Addr() string {
+func (s *server) Addr() string {
 	return (*s.listener).Addr().String()
 }
 
-func (s *Server) Stop() error {
+func (s *server) Stop() error {
 	return (*s.listener).Close()
 }
