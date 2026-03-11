@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -57,14 +56,9 @@ func runConsumer(id int, cfg *core.Config, groupID, topic string, partitionIDs [
 		log.Fatalf("Failed to create consumer %d: %s", id, err)
 	}
 
-	// FIXME: [HIGH BUG] Remove the unreachable ErrOffsetNotFound branch and promote the else clause to log.Fatalf so that a failed offset fetch is a hard startup error rather than a silent offset reset.
 	offsets, err := c.FetchAllOffsets()
 	if err != nil {
-		if errors.Is(err, core.ErrOffsetNotFound) {
-			log.Info("No prior offset found.")
-		} else {
-			log.Warnf("Failed to fetch previous offset, restarting from 0: %s", err.Error())
-		}
+		log.Warnf("Failed to fetch previous offset, restarting from 0: %s", err.Error())
 	}
 
 	for partitionIndex, offset := range offsets {

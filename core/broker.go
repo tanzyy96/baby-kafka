@@ -181,7 +181,10 @@ func (b *broker) Consume(topicName string, partitionIndex int32, offset int64) (
 }
 
 func (b *broker) FetchOffset(groupID, topic string, partitionIndex int32) (int64, error) {
-	offset, _ := b.offsetManager.Offset(groupID, topic, partitionIndex)
+	offset, found := b.offsetManager.Offset(groupID, topic, partitionIndex)
+	if !found {
+		return 0, ErrOffsetNotFound
+	}
 	return offset, nil
 }
 
