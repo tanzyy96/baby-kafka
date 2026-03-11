@@ -130,16 +130,15 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 						}
 					}
 
-					if pollErr == nil {
-						if err := c.CommitOffset(partitionIndex, atOffset+1); err != nil {
-							log.Warn("Failed to commit offset", "partitionIndex", partitionIndex, "offset", atOffset+1, "err", err)
-						}
-						log.Info("Commited offset", "partitionIndex", partitionIndex, "offset", atOffset+1)
-					}
-
 					// Select allows us to exit early if the context is done
 					select {
 					case resultChan <- PollResult{PartitionIndex: partitionIndex, Key: key, Value: value, Offset: atOffset, Err: pollErr}:
+						if pollErr == nil {
+							if err := c.CommitOffset(partitionIndex, atOffset+1); err != nil {
+								log.Warn("Failed to commit offset", "partitionIndex", partitionIndex, "offset", atOffset+1, "err", err)
+							}
+							log.Info("Commited offset", "partitionIndex", partitionIndex, "offset", atOffset+1)
+						}
 					case <-ctx.Done():
 						return
 					}
@@ -385,7 +384,8 @@ func (c *consumer) Poll(partitionIndex int32) (key []byte, value []byte, atOffse
 }
 
 // CommitOffset commits the next offset to read for the given partition.
-// Remember to do +1 before you pass it in here.
+//
+// If we're incrementing the offset, remember to do +1 before you pass it in here.
 func (c *consumer) CommitOffset(partitionIndex int32, nextOffset int64) error {
 	conn, writer, _, err := c.getConnection(partitionIndex)
 	if err != nil {
