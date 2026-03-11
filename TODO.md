@@ -74,8 +74,8 @@
 - [ ] Refactor partition logic to producer-side instead of broker side
 
 ## Phase 8: Replication
-- [ ] Each partition has a leader and N followers
-- [ ] Followers replicate by fetching from leader
+- [x] Each partition has a leader and N followers
+- [x] Followers replicate by fetching from leader
 - [ ] Leader tracks in-sync replicas (ISR)
 - [ ] Message only committed once all ISR acknowledge
 - [ ] Leader election on failure

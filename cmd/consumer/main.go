@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"baby-kafka/core"
 	"baby-kafka/core/client"
@@ -80,27 +79,15 @@ func runConsumer(id int, cfg *core.Config, groupID, topic string, partitionIDs [
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
-	errDelay := 1 * time.Second
-
 	for {
 		select {
 		case result := <-resultCh:
 			errMsg := ""
 			if result.Err == nil {
 				log.Info("Consumer received message", "id", id, "topic", topic, "partition", result.PartitionIndex, "offset", result.Offset, "key", string(result.Key), "value", string(result.Value), "err", errMsg)
-
-				time.Sleep(cfg.Consumer.PollInterval * time.Second)
-				errDelay = 1 * time.Second
 			} else {
 				errMsg = result.Err.Error()
 				log.Warn("Consumer failed to receive message", "error", errMsg)
-
-				time.Sleep(errDelay)
-				if errDelay*2 < cfg.Consumer.MaxErrorInterval {
-					errDelay *= 2
-				} else {
-					errDelay = cfg.Consumer.MaxErrorInterval
-				}
 			}
 
 		case <-quit:

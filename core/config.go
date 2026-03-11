@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/json"
 	"os"
-	"time"
 
 	"github.com/charmbracelet/log"
 )
@@ -22,11 +21,11 @@ type Config struct {
 
 type ConsumerConfig struct {
 	// Interval between polls for messages
-	PollInterval time.Duration `json:"poll_interval"`
+	PollInterval int `json:"poll_interval"`
 	// Sleep interval when no messages are consumed
-	SleepInterval time.Duration `json:"sleep_interval"`
+	SleepInterval int `json:"sleep_interval"`
 	// Maximum interval between errors for exponential backoff
-	MaxErrorInterval time.Duration `json:"max_error_interval"`
+	MaxErrorInterval int `json:"max_error_interval"`
 }
 
 // BrokerConfig contains information on the other brokers/servers in the cluster
@@ -55,9 +54,9 @@ func DefaultConfig() *Config {
 		},
 		ReplicationFactor: 1,
 		Consumer: ConsumerConfig{
-			PollInterval:     1 * time.Second,
-			SleepInterval:    3 * time.Second,
-			MaxErrorInterval: 10 * time.Second,
+			PollInterval:     1,
+			SleepInterval:    3,
+			MaxErrorInterval: 10,
 		},
 	}
 }

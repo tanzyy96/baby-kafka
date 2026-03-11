@@ -123,14 +123,14 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 					if pollErr != nil {
 						if errors.Is(pollErr, core.ErrOffsetNotFound) {
 							log.Debug("Offset not found for partition, sleeping", "partitionIndex", partitionIndex)
-							time.Sleep(c.cfg.Consumer.SleepInterval * time.Second)
+							time.Sleep(time.Duration(c.cfg.Consumer.SleepInterval) * time.Second)
 							continue
 						} else {
 							log.Warn("Failed to poll partition", "partitionIndex", partitionIndex, "err", pollErr)
 						}
 					}
 
-					if pollErr != nil {
+					if pollErr == nil {
 						if err := c.CommitOffset(partitionIndex, atOffset+1); err != nil {
 							log.Warn("Failed to commit offset", "partitionIndex", partitionIndex, "offset", atOffset+1, "err", err)
 						}
@@ -519,13 +519,13 @@ func (c *consumer) Close() error {
 func (c *consumer) SleepBetweenPolls(errDelay *time.Duration, hasError bool) {
 	if hasError {
 		time.Sleep(*errDelay)
-		if *errDelay*2 < c.cfg.Consumer.MaxErrorInterval {
+		if *errDelay*2 < time.Duration(c.cfg.Consumer.MaxErrorInterval)*time.Second {
 			*errDelay *= 2
 		} else {
-			*errDelay = c.cfg.Consumer.MaxErrorInterval
+			*errDelay = time.Duration(c.cfg.Consumer.MaxErrorInterval) * time.Second
 		}
 	} else {
-		time.Sleep(c.cfg.Consumer.PollInterval * time.Second)
+		time.Sleep(time.Duration(c.cfg.Consumer.PollInterval) * time.Second)
 		*errDelay = 1 * time.Second
 	}
 }
