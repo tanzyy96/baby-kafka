@@ -23,18 +23,31 @@ Example of directory:
 	/00000001.log
 	/00000001.index
 */
-type Partition struct {
+
+type Partition interface {
+	BasePath() string
+	Append(msg Message) (offset int64, err error)
+	ReadAt(offset int64) (*Message, error)
+	AppendReplicated(msg MessageWithOffset) error
+}
+
+type partition struct {
 	Path  string // Partition folder path
 	Index int32
 
-	mutex     sync.RWMutex // Locks read operations during writes & rollovers
+	// Locks read operations during writes & rollovers
+	mutex     sync.RWMutex
 	logs      []*Log
 	activeLog *Log
 	maxSize   int64 // cap for rollover
+
+	// Replication stuff
+	// isLeader bool
+	// leaderState *LeaderState
 }
 
 // NewPartition should create a new log and then register it to this partition
-func NewPartition(index int32, folderPath string, maxSize int64) (*Partition, error) {
+func NewPartition(index int32, folderPath string, maxSize int64) (Partition, error) {
 	partitionPath := fmt.Sprintf("%s/partition-%d", folderPath, index)
 	if err := os.MkdirAll(partitionPath, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create partition directory: %w", err)
@@ -51,7 +64,7 @@ func NewPartition(index int32, folderPath string, maxSize int64) (*Partition, er
 		maxSize = MaxSize
 	}
 
-	return &Partition{
+	return &partition{
 		Path:      partitionPath,
 		Index:     index,
 		activeLog: firstLog,
@@ -60,12 +73,12 @@ func NewPartition(index int32, folderPath string, maxSize int64) (*Partition, er
 	}, nil
 }
 
-func LoadPartitions(basePath string, maxSize int64) (partitions map[int32]*Partition, err error) {
+func LoadPartitions(basePath string, maxSize int64) (partitions map[int32]Partition, err error) {
 	f, err := os.ReadDir(basePath)
 	if err != nil {
 		return nil, err
 	}
-	partitions = make(map[int32]*Partition)
+	partitions = make(map[int32]Partition)
 
 	// Consider chance of rubbish files
 	for _, f := range f {
@@ -92,7 +105,7 @@ func LoadPartitions(basePath string, maxSize int64) (partitions map[int32]*Parti
 }
 
 // Read existing logs in the partition folder and set the active log to the last one. This is used when we restart the server and need to load existing partitions.
-func LoadPartition(index int32, folderPath string, maxSize int64) (*Partition, error) {
+func LoadPartition(index int32, folderPath string, maxSize int64) (Partition, error) {
 	partitionPath := fmt.Sprintf("%s/partition-%d", folderPath, index)
 	if _, err := os.Stat(partitionPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("partition %s directory not found", partitionPath)
@@ -123,7 +136,7 @@ func LoadPartition(index int32, folderPath string, maxSize int64) (*Partition, e
 	active := activeLog(logs)
 	log.Debugf("Loaded partition %d with %d log segment(s)", index, len(logs))
 
-	return &Partition{
+	return &partition{
 		Path:      partitionPath,
 		Index:     index,
 		maxSize:   maxSize,
@@ -132,7 +145,11 @@ func LoadPartition(index int32, folderPath string, maxSize int64) (*Partition, e
 	}, nil
 }
 
-func (p *Partition) Append(msg Message) (offset int64, err error) {
+func (p *partition) BasePath() string {
+	return p.Path
+}
+
+func (p *partition) Append(msg Message) (offset int64, err error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
@@ -146,7 +163,21 @@ func (p *Partition) Append(msg Message) (offset int64, err error) {
 	return offset, err
 }
 
-func (p *Partition) ReadAt(offset int64) (*Message, error) {
+func (p *partition) AppendReplicated(msg MessageWithOffset) error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.shouldRoll() {
+		if err := p.rollover(); err != nil {
+			return fmt.Errorf("failed to append message: %w", err)
+		}
+	}
+
+	_, err := p.activeLog.AppendReplicated(msg)
+	return err
+}
+
+func (p *partition) ReadAt(offset int64) (*Message, error) {
 	p.mutex.RLock()
 	defer p.mutex.RUnlock()
 
@@ -161,7 +192,7 @@ func (p *Partition) ReadAt(offset int64) (*Message, error) {
 }
 
 // Rollover creates a new log file and sets it as the active log. The old log is added to the logs array.
-func (p *Partition) rollover() error {
+func (p *partition) rollover() error {
 	newBaseOffset := p.activeLog.baseOffset + p.activeLog.nextOffset
 	newLog, err := NewLog(newBaseOffset, p.Path)
 	if err != nil {
@@ -176,13 +207,13 @@ func (p *Partition) rollover() error {
 
 // A partition should roll to the next log when the active
 // log exceeds maxSize.
-func (p *Partition) shouldRoll() bool {
+func (p *partition) shouldRoll() bool {
 	return p.activeLog.size >= p.maxSize
 }
 
 // Log name is 20-padded offset, starting from 00000000000000000000.log
 // We can use the nextOffset of the active log to determine the name of the next log, since it represents the offset of the next message to be appended.
-func (p *Partition) getNextLogname() string {
+func (p *partition) getNextLogname() string {
 	nextOffset := p.activeLog.nextOffset
 	return fmt.Sprintf("%020d", nextOffset)
 }

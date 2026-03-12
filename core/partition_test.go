@@ -11,7 +11,7 @@ import (
 
 const testPartitionDir = "babykafka_partition_test"
 
-func newTestPartition(t *testing.T, maxSize int64) *core.Partition {
+func newTestPartition(t *testing.T, maxSize int64) core.Partition {
 	// Create a temporary directory for the partition
 	dir, err := os.MkdirTemp("", testPartitionDir)
 	require.NoError(t, err)
@@ -32,7 +32,7 @@ func TestNewPartition(t *testing.T) {
 	partition := newTestPartition(t, 0)
 
 	// The log should be created in the partition directory
-	require.FileExists(t, partition.Path+"/00000000000000000000.log")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000000.log")
 }
 
 func TestPartitionAppendAndReadAt(t *testing.T) {
@@ -69,11 +69,11 @@ func TestPartitionAppend_Rollover(t *testing.T) {
 	}
 
 	// We should have rolled over to a new log file
-	require.FileExists(t, partition.Path+"/00000000000000000000.log")
-	require.FileExists(t, partition.Path+"/00000000000000000001.log")
-	require.FileExists(t, partition.Path+"/00000000000000000002.log")
-	require.FileExists(t, partition.Path+"/00000000000000000003.log")
-	require.FileExists(t, partition.Path+"/00000000000000000004.log")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000000.log")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000001.log")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000002.log")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000003.log")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000004.log")
 }
 
 func TestPartitionReadAtWithRollover(t *testing.T) {
@@ -90,10 +90,10 @@ func TestPartitionReadAtWithRollover(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	require.FileExists(t, partition.Path+"/00000000000000000000.log")
-	require.FileExists(t, partition.Path+"/00000000000000000000.index")
-	require.FileExists(t, partition.Path+"/00000000000000000001.log")
-	require.FileExists(t, partition.Path+"/00000000000000000001.index")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000000.log")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000000.index")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000001.log")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000001.index")
 
 	for i, msg := range messages {
 		readMsg, err := partition.ReadAt(int64(i))
@@ -117,10 +117,10 @@ func TestLoadPartition(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	require.FileExists(t, partition.Path+"/00000000000000000000.log")
-	require.FileExists(t, partition.Path+"/00000000000000000000.index")
-	require.FileExists(t, partition.Path+"/00000000000000000001.log")
-	require.FileExists(t, partition.Path+"/00000000000000000001.index")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000000.log")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000000.index")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000001.log")
+	require.FileExists(t, partition.BasePath()+"/00000000000000000001.index")
 
 	for i, msg := range messages {
 		readMsg, err := partition.ReadAt(int64(i))
@@ -130,7 +130,7 @@ func TestLoadPartition(t *testing.T) {
 	}
 
 	// Now we load the partition again and verify we can read the messages
-	folderPath := partition.Path[:len(partition.Path)-len("/partition-0")]
+	folderPath := partition.BasePath()[:len(partition.BasePath())-len("/partition-0")]
 	loadedPartition, err := core.LoadPartition(0, folderPath, 1)
 	require.NoError(t, err)
 
