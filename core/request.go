@@ -72,6 +72,16 @@ type BroadcastTopicMetadataRequest struct {
 	Metadata map[string]*TopicMetadata
 }
 
+type FetchLogRequest struct {
+	Topic          string
+	PartitionIndex int32
+	ReplicaID      int32
+}
+
+type FetchLogResponse struct {
+	Messages []*MessageWithOffset
+}
+
 // handleRequest decodes Req from payload, calls fn, encodes the Resp, and wraps it in a proto.Response frame.
 func handleRequest[Req any, Resp any](payload []byte, fn func(Req) (Resp, error)) ([]byte, error) {
 	var req Req

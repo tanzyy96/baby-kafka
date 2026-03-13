@@ -43,14 +43,19 @@ type OffsetValue struct {
 	CreatedAt int64
 }
 
-type OffsetManager struct {
+type OffsetManager interface {
+	CommitOffset(groupID string, topicID string, partitionID int32, newOffset int64)
+	Offset(groupID string, topicID string, partitionID int32) (int64, bool)
+}
+
+type offsetManager struct {
 	// map[groupID]map[topicID]map[partitionID]offset
 	offsets     map[string]map[string]map[int32]int64
 	offsetTopic *Topic
 	mutex       sync.RWMutex
 }
 
-func NewOffsetManager(basePath string, rolloverLimit int64) (*OffsetManager, error) {
+func NewOffsetManager(basePath string, rolloverLimit int64) (OffsetManager, error) {
 	offsets := make(map[string]map[string]map[int32]int64)
 
 	partitionIndices := []int32{}
@@ -62,19 +67,19 @@ func NewOffsetManager(basePath string, rolloverLimit int64) (*OffsetManager, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to init offset manager: %w", err)
 	}
-	return &OffsetManager{
+	return &offsetManager{
 		offsets:     offsets,
 		offsetTopic: t,
 	}, nil
 }
 
-func LoadOffsetManager(basePath string, rolloverLimit int64) (*OffsetManager, error) {
+func LoadOffsetManager(basePath string, rolloverLimit int64) (OffsetManager, error) {
 	offsetPath := fmt.Sprintf("%s/%s", basePath, offsetTopic)
 	if _, err := os.Stat(offsetPath); os.IsNotExist(err) {
 		return NewOffsetManager(basePath, rolloverLimit)
 	}
 
-	om := &OffsetManager{}
+	om := &offsetManager{}
 	if err := om.restore(basePath, rolloverLimit); err != nil {
 		return nil, fmt.Errorf("failed to load offset manager: %w", err)
 	}
@@ -82,7 +87,7 @@ func LoadOffsetManager(basePath string, rolloverLimit int64) (*OffsetManager, er
 	return om, nil
 }
 
-func (om *OffsetManager) updateOffset(groupID string, topicID string, partitionID int32, newOffset int64) {
+func (om *offsetManager) updateOffset(groupID string, topicID string, partitionID int32, newOffset int64) {
 	om.mutex.Lock()
 	defer om.mutex.Unlock()
 
@@ -99,7 +104,7 @@ func (om *OffsetManager) updateOffset(groupID string, topicID string, partitionI
 	om.offsets[groupID][topicID][partitionID] = newOffset
 }
 
-func (om *OffsetManager) CommitOffset(groupID string, topicID string, partitionID int32, newOffset int64) {
+func (om *offsetManager) CommitOffset(groupID string, topicID string, partitionID int32, newOffset int64) {
 	om.updateOffset(groupID, topicID, partitionID, newOffset)
 
 	if err := om.persistToLog(groupID, topicID, partitionID, newOffset); err != nil {
@@ -107,7 +112,7 @@ func (om *OffsetManager) CommitOffset(groupID string, topicID string, partitionI
 	}
 }
 
-func (om *OffsetManager) Offset(groupID string, topicID string, partitionID int32) (int64, bool) {
+func (om *offsetManager) Offset(groupID string, topicID string, partitionID int32) (int64, bool) {
 	om.mutex.RLock()
 	defer om.mutex.RUnlock()
 	topics, ok := om.offsets[groupID]
@@ -122,7 +127,7 @@ func (om *OffsetManager) Offset(groupID string, topicID string, partitionID int3
 	return v, ok
 }
 
-func (om *OffsetManager) persistToLog(groupID string, topicID string, partitionID int32, newOffset int64) error {
+func (om *offsetManager) persistToLog(groupID string, topicID string, partitionID int32, newOffset int64) error {
 	now := time.Now()
 	key := OffsetKey{
 		GroupID:        groupID,
@@ -152,7 +157,7 @@ func (om *OffsetManager) persistToLog(groupID string, topicID string, partitionI
 	return nil
 }
 
-func (om *OffsetManager) restore(basePath string, rolloverLimit int64) error {
+func (om *offsetManager) restore(basePath string, rolloverLimit int64) error {
 	t, err := LoadTopic(offsetTopic, fmt.Sprintf("%s/%s", basePath, offsetTopic), rolloverLimit)
 	if err != nil {
 		return fmt.Errorf("failed to restore offsets from %s: %w", offsetTopic, err)
@@ -165,7 +170,7 @@ func (om *OffsetManager) restore(basePath string, rolloverLimit int64) error {
 	skipped := 0
 
 	for _, partition := range t.partitions {
-		for _, lg := range partition.logs {
+		for _, lg := range partition.Logs() {
 			// Go down every message to updateOffset
 			offset := lg.baseOffset
 			for offset < lg.nextOffset {

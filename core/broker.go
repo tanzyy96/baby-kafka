@@ -38,7 +38,7 @@ type broker struct {
 	brokerConfigs []BrokerConfig
 	brokerClients map[int32]BrokerClient
 
-	offsetManager   *OffsetManager
+	offsetManager   OffsetManager
 	metadataManager MetadataManager
 }
 

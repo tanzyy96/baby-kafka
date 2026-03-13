@@ -21,7 +21,7 @@ type Topic struct {
 	Key string
 
 	folderPath    string
-	partitions    map[int32]*Partition
+	partitions    map[int32]Partition
 	numPartitions int32
 	// TODO: load from disk
 	// configFile    *os.File
@@ -39,7 +39,7 @@ func NewTopic(key string, partitionIndices []int32, folderPath string, rolloverL
 	}
 	log.Infof("Created topic %s at %s", key, topicPath)
 
-	partitions := make(map[int32]*Partition)
+	partitions := make(map[int32]Partition)
 	for _, i := range partitionIndices {
 		p, err := NewPartition(i, topicPath, rolloverLimit)
 		if err != nil {
@@ -104,7 +104,7 @@ func LoadTopics(basePath string, rolloverLimit int64) (map[string]*Topic, error)
 	return topics, nil
 }
 
-func (t *Topic) nextPartition(key *string) (*Partition, error) {
+func (t *Topic) nextPartition(key *string) (Partition, error) {
 	partitions := t.partitions
 	if key == nil {
 		// Round robin

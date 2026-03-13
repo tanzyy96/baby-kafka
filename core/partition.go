@@ -25,7 +25,10 @@ Example of directory:
 */
 
 type Partition interface {
+	ID() int32
 	BasePath() string
+	Logs() []*Log
+
 	Append(msg Message) (offset int64, err error)
 	ReadAt(offset int64) (*Message, error)
 	AppendReplicated(msg MessageWithOffset) error
@@ -145,8 +148,16 @@ func LoadPartition(index int32, folderPath string, maxSize int64) (Partition, er
 	}, nil
 }
 
+func (p *partition) ID() int32 {
+	return p.Index
+}
+
 func (p *partition) BasePath() string {
 	return p.Path
+}
+
+func (p *partition) Logs() []*Log {
+	return p.logs
 }
 
 func (p *partition) Append(msg Message) (offset int64, err error) {
