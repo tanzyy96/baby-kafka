@@ -57,9 +57,9 @@ Clients can discover partition leadership via GetMetadata.
     - [x] Consumer is initialised with groupID and target partitions. We'll spin up the correct number of partitions from the `main.go` side for now. Later on we'll dynamically allocate partitions based on consumer group size via a coordinator.
 
 ## Chapter 2: Log replication (leader → followers)
-The objective is to keep follower logs identical to the leader log.
+The objective is to keep follower logs identical to the leader log. The main implementation revolves around goroutine to pull logs from leader to follower.
 
-1. Each follower runs a fetch loop for each partition it follows
+1. Each follower runs a fetch loop for each partition it follows -- pull mechanism
     - [ ] Background goroutine started on broker startup (after metadata restore)
     - [ ] Loop: send FetchLog(topic, partition, myNextOffset) to leader → receive batch → write to local log → repeat
     - [ ] New message type: MessageTypeFetchLog
