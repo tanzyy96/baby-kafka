@@ -11,5 +11,10 @@
       "addr": ":8081"
     }
   ],
-  "replication_factor": 1
+  "replication_factor": 1,
+  "consumer": {
+    "poll_interval": 1,
+    "sleep_interval": 3,
+    "max_error_interval": 10
+  }
 }

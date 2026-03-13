@@ -16,6 +16,7 @@ type Config struct {
 	RolloverLimit     int64          `json:"rollover_limit"`
 	Brokers           []BrokerConfig `json:"brokers"`
 	ReplicationFactor int32          `json:"replication_factor"`
+	ReplicationDelay  int            `json:"replication_delay"`
 	Consumer          ConsumerConfig `json:"consumer"`
 }
 
@@ -53,6 +54,7 @@ func DefaultConfig() *Config {
 			{Index: 1, Addr: ":8081"},
 		},
 		ReplicationFactor: 1,
+		ReplicationDelay:  1,
 		Consumer: ConsumerConfig{
 			PollInterval:     1,
 			SleepInterval:    3,
