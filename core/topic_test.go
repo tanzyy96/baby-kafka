@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	core "baby-kafka/core"
+	testutils "baby-kafka/core/test_utils"
 
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +17,7 @@ func newTestTopic(t *testing.T) *core.Topic {
 
 	rolloverSize := int64(1024 * 1024) // 1MB for testing
 
-	topic, err := core.NewTopic("test", []int32{0, 1}, dir, rolloverSize)
+	topic, err := core.NewTopic("test", []int32{0, 1}, dir, rolloverSize, testutils.TestLogger())
 	require.NoError(t, err)
 
 	return topic

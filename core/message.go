@@ -15,6 +15,11 @@ type Message struct {
 	Checksum  uint32
 }
 
+type MessageWithOffset struct {
+	Message *Message
+	Offset  int64
+}
+
 func NewMessage(key, value []byte) *Message {
 	v := []byte(key)
 	v = append(v, value...)

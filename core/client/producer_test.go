@@ -66,7 +66,7 @@ func TestProducer_Send(t *testing.T) {
 		ReplicationFactor: 1,
 	}
 
-	producer, err := client.NewProducer(cfg, client.WithProducerDialFn(testDialFn))
+	producer, err := client.NewProducer(cfg, testutils.TestLogger(), client.WithProducerDialFn(testDialFn))
 	require.NoError(t, err)
 
 	resp, err := producer.Send("test-topic", []byte("key1"), []byte("value1"))

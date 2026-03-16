@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,10 +33,12 @@ const (
 	MessageTypeCommitOffset      = 6
 	MessageTypeGetMetadata       = 7
 	MessageTypeBroadcastMetadata = 8
+	MessageTypeFetchLog          = 9
 )
 
 type Server interface {
 	Start(ctx context.Context) error
+	StartReplication(ctx context.Context) error
 	Addr() string
 	Stop() error
 }
@@ -44,6 +47,7 @@ type server struct {
 	listener   *net.Listener
 	broker     Broker
 	numClients atomic.Int32
+	logger     *log.Logger
 }
 
 type Request struct{}
@@ -62,19 +66,29 @@ func NewServer(cfg *Config, brokerID int32) (Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to start network listener: %w", err)
 	}
-	b, err := NewBroker(brokerID, cfg)
+	// If the address is ":0", we need to update it to the actual address that the listener is bound to.
+	if brokerConfig.Addr == ":0" {
+		cfg.Brokers[brokerID].Addr = n.Addr().String()
+	}
+
+	rootLogger := log.NewWithOptions(os.Stderr, log.Options{})
+
+	b, err := NewBroker(brokerID, cfg, rootLogger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create broker: %w", err)
 	}
-	log.Infof("server %d started on %s", brokerID, n.Addr())
+
+	logger := deriveLogger(rootLogger, fmt.Sprintf("server-%d", brokerID))
+	logger.Infof("started on %s", cfg.Brokers[brokerID].Addr)
 	return &server{
 		listener: &n,
 		broker:   b,
+		logger:   logger,
 	}, nil
 }
 
 func (s *server) Start(ctx context.Context) error {
-	log.Infof("server started on %s, listening for connections...", s.Addr())
+	s.logger.Infof("listening for connections on %s", s.Addr())
 
 	wg := sync.WaitGroup{}
 
@@ -84,12 +98,14 @@ func (s *server) Start(ctx context.Context) error {
 		(*s.listener).Close()
 	}()
 
+	go s.StartReplication(ctx)
+
 	for {
 		conn, err := (*s.listener).Accept()
 		if err != nil {
 			select {
 			case <-ctx.Done():
-				log.Warn("Received shutdown signal, closing listener...")
+				s.logger.Warn("received shutdown signal, closing listener...")
 				wg.Wait() // wait for connections to close
 				return nil
 			default:
@@ -100,7 +116,7 @@ func (s *server) Start(ctx context.Context) error {
 		wg.Add(1)
 		s.numClients.Add(1)
 
-		log.Infof("New connection from %s: total %d", conn.RemoteAddr(), s.numClients.Load())
+		s.logger.Infof("new connection from %s: total %d", conn.RemoteAddr(), s.numClients.Load())
 		go func() {
 			// Track active connections and wait for them to finish before shutting down the server
 			defer s.numClients.Add(-1)
@@ -124,9 +140,9 @@ func (s *server) handleConnection(ctx context.Context, conn net.Conn) {
 		msgType, payload, err := proto.ReadFrame(conn)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				log.Info("Client disconnected")
+				s.logger.Info("client disconnected")
 			} else {
-				log.Warnf("Failed to read message frame: %v\n", err)
+				s.logger.Warnf("failed to read message frame: %v", err)
 			}
 			return
 
@@ -152,7 +168,7 @@ func (s *server) handleConnection(ctx context.Context, conn net.Conn) {
 		case MessageTypeBroadcastMetadata:
 			resp, err = s.handleBroadcastMetadata(payload)
 		default:
-			log.Warnf("Unknown message type received: %d", msgType)
+			s.logger.Warnf("unknown message type received: %d", msgType)
 			err = fmt.Errorf("unknown message type: %d", msgType)
 		}
 
@@ -174,4 +190,8 @@ func (s *server) Addr() string {
 
 func (s *server) Stop() error {
 	return (*s.listener).Close()
+}
+
+func (s *server) StartReplication(ctx context.Context) error {
+	return s.broker.StartReplication(ctx)
 }

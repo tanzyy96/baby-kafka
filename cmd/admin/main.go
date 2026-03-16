@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"os"
 
 	"baby-kafka/core"
 	"baby-kafka/core/client"
@@ -57,7 +58,7 @@ func main() {
 }
 
 func adminCreateTopic(addr, topic string, numPartitions int) {
-	admin, err := client.NewAdmin(addr)
+	admin, err := client.NewAdmin(addr, log.NewWithOptions(os.Stderr, log.Options{}))
 	if err != nil {
 		log.Fatalf("Failed to create admin client: %s", err)
 	}
@@ -74,7 +75,7 @@ func adminCreateTopic(addr, topic string, numPartitions int) {
 }
 
 func adminListTopics(addr string) {
-	admin, err := client.NewAdmin(addr)
+	admin, err := client.NewAdmin(addr, log.NewWithOptions(os.Stderr, log.Options{}))
 	if err != nil {
 		log.Fatalf("Failed to create admin client: %s", err)
 	}

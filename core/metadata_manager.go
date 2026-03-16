@@ -78,10 +78,12 @@ type metadataManager struct {
 	metadata      map[string]*TopicMetadata
 	metadataTopic *Topic
 	mutex         sync.RWMutex
+	logger        *log.Logger
 }
 
 // NewMetadataManager creates a new MetadataManager.
-func NewMetadataManager(basePath string, rolloverLimit int64) (MetadataManager, error) {
+func NewMetadataManager(basePath string, rolloverLimit int64, logger *log.Logger) (MetadataManager, error) {
+	mmLogger := deriveLogger(logger, "metadata")
 	m := make(map[string]*TopicMetadata)
 
 	partitionIndices := []int32{}
@@ -89,26 +91,27 @@ func NewMetadataManager(basePath string, rolloverLimit int64) (MetadataManager, 
 		partitionIndices = append(partitionIndices, i)
 	}
 
-	t, err := NewTopic(metadataTopic, partitionIndices, basePath, rolloverLimit)
+	t, err := NewTopic(metadataTopic, partitionIndices, basePath, rolloverLimit, mmLogger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init offset manager: %w", err)
 	}
 
-	return &metadataManager{metadata: m, metadataTopic: t}, nil
+	return &metadataManager{metadata: m, metadataTopic: t, logger: mmLogger}, nil
 }
 
-func LoadMetadataManager(basePath string, rolloverLimit int64) (MetadataManager, error) {
+func LoadMetadataManager(basePath string, rolloverLimit int64, logger *log.Logger) (MetadataManager, error) {
+	mmLogger := deriveLogger(logger, "metadata")
 	metadataPath := fmt.Sprintf("%s/%s", basePath, metadataTopic)
 	if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
-		return NewMetadataManager(basePath, rolloverLimit)
+		return NewMetadataManager(basePath, rolloverLimit, logger)
 	}
 
-	var mm metadataManager
-	if err := mm.restore(metadataPath, rolloverLimit); err != nil {
+	mm := &metadataManager{logger: mmLogger}
+	if err := mm.restore(metadataPath, rolloverLimit, mmLogger); err != nil {
 		return nil, fmt.Errorf("failed to restore metadata: %w", err)
 	}
-	log.Info("Loaded metadata")
-	return &mm, nil
+	mm.logger.Info("loaded metadata")
+	return mm, nil
 }
 
 func (m *metadataManager) persistToLog(metadata map[string]*TopicMetadata) error {
@@ -195,25 +198,27 @@ func (m *metadataManager) createAndAssign(brokerConfigs []BrokerConfig, topic st
 // For each partition, it should be located in one leader broker and (replicationFactor) replica brokers
 // So for example:
 // Partition 1 -> Broker 1 (Leader) + Broker 2 & 3 (Followers)
-// This also means that replicationFactor <= numPartitions - 1, else it wouldnt make sense
+// This also means that replicationFactor <= numBrokers - 1, else it wouldnt make sense
 func (m *metadataManager) Init(brokerConfigs []BrokerConfig, topic string, numPartitions int32, replicationFactor int32) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	if replicationFactor > numPartitions-1 {
-		return fmt.Errorf("replicationFactor cannot be GTE numPartitions")
+	numBrokers := int32(len(brokerConfigs))
+
+	if replicationFactor > numBrokers-1 {
+		return fmt.Errorf("replicationFactor cannot be greater than or equal to numBrokers - 1: %d > %d", replicationFactor, numBrokers-1)
 	}
 
 	mt := m.createAndAssign(brokerConfigs, topic, numPartitions, replicationFactor)
 
 	m.metadata[topic] = &mt
 
-	log.Debug("Created metadata", "metadata", mt)
+	m.logger.Debug("created metadata", "metadata", mt)
 
 	if err := m.persistToLog(map[string]*TopicMetadata{
 		topic: &mt,
 	}); err != nil {
-		log.Warnf("failed to persist topic metadata to %s", metadataTopic)
+		m.logger.Warnf("failed to persist topic metadata to %s", metadataTopic)
 	}
 
 	return nil
@@ -251,7 +256,7 @@ func (m *metadataManager) update(metadata map[string]*TopicMetadata) {
 
 	for topic, meta := range metadata {
 		if _, ok := m.metadata[topic]; ok {
-			log.Warnf("Topic %s already exists. Overwritting..", topic)
+			m.logger.Warnf("topic %s already exists, overwriting", topic)
 		}
 		m.metadata[topic] = meta
 	}
@@ -261,12 +266,12 @@ func (m *metadataManager) update(metadata map[string]*TopicMetadata) {
 func (m *metadataManager) Update(metadata map[string]*TopicMetadata) {
 	m.update(metadata)
 	if err := m.persistToLog(metadata); err != nil {
-		log.Warnf("failed to persist metadata update to %s", metadataTopic)
+		m.logger.Warnf("failed to persist metadata update to %s", metadataTopic)
 	}
 }
 
-func (m *metadataManager) restore(basePath string, rolloverLimit int64) error {
-	t, err := LoadTopic(metadataTopic, basePath, rolloverLimit)
+func (m *metadataManager) restore(basePath string, rolloverLimit int64, logger *log.Logger) error {
+	t, err := LoadTopic(metadataTopic, basePath, rolloverLimit, logger)
 	if err != nil {
 		return fmt.Errorf("failed to load metadata topic: %w", err)
 	}
@@ -279,11 +284,11 @@ func (m *metadataManager) restore(basePath string, rolloverLimit int64) error {
 
 	// Read metadata logs and run through them to populate metadata map
 	for _, partition := range t.partitions {
-		for _, lg := range partition.logs {
+		for _, lg := range partition.Logs() {
 			// Go down every message to updateOffset
 			offset := lg.baseOffset
 			for offset < lg.nextOffset {
-				msg, err := lg.Read(offset)
+				msg, err := lg.ReadAt(offset)
 				if err != nil {
 					break // should be done reading this log
 				}
@@ -292,14 +297,14 @@ func (m *metadataManager) restore(basePath string, rolloverLimit int64) error {
 				value := MetadataValue{}
 
 				if err := proto.GobDecode(msg.Key, &key); err != nil {
-					log.Warnf("restore: skipping record at offset %d: failed to decode key: %v", offset, err)
+					m.logger.Warnf("restore: skipping record at offset %d: failed to decode key: %v", offset, err)
 					skipped++
 					offset++
 					continue
 				}
 
 				if err := proto.GobDecode(msg.Value, &value); err != nil {
-					log.Warnf("restore: skipping record at offset %d: failed to decode value: %v", offset, err)
+					m.logger.Warnf("restore: skipping record at offset %d: failed to decode value: %v", offset, err)
 					skipped++
 					offset++
 					continue
@@ -316,7 +321,7 @@ func (m *metadataManager) restore(basePath string, rolloverLimit int64) error {
 		}
 	}
 
-	log.Infof("Restored %d offset(s) from log (%d record(s) skipped)", restored, skipped)
+	m.logger.Infof("restored %d offset(s) from log (%d record(s) skipped)", restored, skipped)
 
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	core "baby-kafka/core"
+	testutils "baby-kafka/core/test_utils"
 
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +25,7 @@ func newTestBroker(t *testing.T) core.Broker {
 		Brokers:       brokerConfigs,
 	}
 
-	broker, err := core.NewBroker(0, cfg)
+	broker, err := core.NewBroker(0, cfg, testutils.TestLogger())
 	require.NoError(t, err)
 	return broker
 }

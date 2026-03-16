@@ -43,15 +43,17 @@ type partition struct {
 	logs      []*Log
 	activeLog *Log
 	maxSize   int64 // cap for rollover
+	logger    *log.Logger
 
 	// Replication stuff
 	// isLeader bool
 	// leaderState *LeaderState
 }
 
-// NewPartition should create a new log and then register it to this partition
-func NewPartition(index int32, folderPath string, maxSize int64) (Partition, error) {
+// NewPartition should create a new log and then register it to this partition. If the partition already exists, it will load it.
+func NewPartition(index int32, folderPath string, maxSize int64, logger *log.Logger) (Partition, error) {
 	partitionPath := fmt.Sprintf("%s/partition-%d", folderPath, index)
+
 	if err := os.MkdirAll(partitionPath, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create partition directory: %w", err)
 	}
@@ -61,44 +63,47 @@ func NewPartition(index int32, folderPath string, maxSize int64) (Partition, err
 		return nil, fmt.Errorf("failed to create partition: %w", err)
 	}
 
-	log.Infof("Created partition %d at %s", index, partitionPath)
-
 	if maxSize == 0 {
 		maxSize = MaxSize
 	}
 
-	return &partition{
+	partLogger := deriveLogger(logger, fmt.Sprintf("partition-%d", index))
+	p := &partition{
 		Path:      partitionPath,
 		Index:     index,
 		activeLog: firstLog,
 		logs:      []*Log{firstLog},
 		maxSize:   maxSize,
-	}, nil
+		logger:    partLogger,
+	}
+	p.logger.Infof("created at %s", partitionPath)
+	return p, nil
 }
 
-func LoadPartitions(basePath string, maxSize int64) (partitions map[int32]Partition, err error) {
+func LoadPartitions(basePath string, maxSize int64, logger *log.Logger) (partitions map[int32]Partition, err error) {
 	f, err := os.ReadDir(basePath)
 	if err != nil {
 		return nil, err
 	}
 	partitions = make(map[int32]Partition)
+	partLogger := deriveLogger(logger, "partition")
 
 	// Consider chance of rubbish files
 	for _, f := range f {
 		if !f.IsDir() || !strings.Contains(f.Name(), "partition-") {
-			log.Warnf("skipping loading of %s", f.Name())
+			partLogger.Warnf("skipping loading of %s", f.Name())
 			continue
 		}
 		parts := strings.Split(f.Name(), "-")
 		idx := parts[len(parts)-1]
 		pidx, err := strconv.Atoi(idx)
 		if err != nil {
-			log.Warn("unable to load partition file", "name", f.Name())
+			partLogger.Warn("unable to load partition file", "name", f.Name())
 			continue
 		}
-		p, err := LoadPartition(int32(pidx), basePath, maxSize)
+		p, err := LoadPartition(int32(pidx), basePath, maxSize, logger)
 		if err != nil {
-			log.Warnf("unable to load partition file %s: %s", f.Name(), err.Error())
+			partLogger.Warnf("unable to load partition file %s: %s", f.Name(), err.Error())
 			continue
 		}
 		partitions[int32(pidx)] = p
@@ -107,11 +112,11 @@ func LoadPartitions(basePath string, maxSize int64) (partitions map[int32]Partit
 	return partitions, nil
 }
 
-// Read existing logs in the partition folder and set the active log to the last one. This is used when we restart the server and need to load existing partitions.
-func LoadPartition(index int32, folderPath string, maxSize int64) (Partition, error) {
+// LoadPartition reads existing logs in the partition folder and sets the active log to the last one. This is used when we restart the server and need to load existing partitions.
+func LoadPartition(index int32, folderPath string, maxSize int64, logger *log.Logger) (Partition, error) {
 	partitionPath := fmt.Sprintf("%s/partition-%d", folderPath, index)
 	if _, err := os.Stat(partitionPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("partition %s directory not found", partitionPath)
+		return NewPartition(index, folderPath, maxSize, logger)
 	}
 
 	// Load logs
@@ -120,6 +125,7 @@ func LoadPartition(index int32, folderPath string, maxSize int64) (Partition, er
 		return nil, fmt.Errorf("failed to read partition directory: %w", err)
 	}
 	logs := []*Log{}
+	partLogger := deriveLogger(logger, fmt.Sprintf("partition-%d", index))
 	for _, file := range files {
 		if file.IsDir() {
 			continue
@@ -130,22 +136,22 @@ func LoadPartition(index int32, folderPath string, maxSize int64) (Partition, er
 		path := fmt.Sprintf("%s/%s", partitionPath, file.Name())
 		lg, err := LoadLog(path)
 		if err != nil {
-			log.Warnf("failed to load log at %s: %v\n", path, err)
+			partLogger.Warnf("failed to load log at %s: %v", path, err)
 		}
 		logs = append(logs, lg)
 	}
 
-	// Determine active log based on max offset
 	active := activeLog(logs)
-	log.Debugf("Loaded partition %d with %d log segment(s)", index, len(logs))
-
-	return &partition{
+	p := &partition{
 		Path:      partitionPath,
 		Index:     index,
 		maxSize:   maxSize,
 		logs:      logs,
 		activeLog: active,
-	}, nil
+		logger:    partLogger,
+	}
+	p.logger.Debugf("loaded with %d log segment(s)", len(logs))
+	return p, nil
 }
 
 func (p *partition) ID() int32 {
@@ -195,7 +201,7 @@ func (p *partition) ReadAt(offset int64) (*Message, error) {
 	// Search the logs array to find the log corresponding to the offset. We can use the baseOffset of each log to determine if the offset falls within that log's range.
 	for _, log := range p.logs {
 		if offset >= log.baseOffset && offset < log.baseOffset+log.nextOffset {
-			return log.Read(offset)
+			return log.ReadAt(offset)
 		}
 	}
 
@@ -209,7 +215,7 @@ func (p *partition) rollover() error {
 	if err != nil {
 		return fmt.Errorf("failed to perform log rollover: %w", err)
 	}
-	log.Infof("Partition %d rolling over: new segment at offset %d (total segments: %d)", p.Index, newBaseOffset, len(p.logs)+1)
+	p.logger.Infof("rolling over: new segment at offset %d (total segments: %d)", newBaseOffset, len(p.logs)+1)
 	p.activeLog = newLog
 	p.logs = append(p.logs, newLog)
 

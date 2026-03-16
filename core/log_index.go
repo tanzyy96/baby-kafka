@@ -74,6 +74,8 @@ func (i *LogIndex) Append(offset int32, bytePos int32) error {
 	return nil
 }
 
+// TODO: this will break if AppendReplicated returns non-incremental offsets
+
 func (i *LogIndex) Read(offset int32) (bytePos int32, err error) {
 	// Jump by n * 8 bytes
 	indexBytePos := offset * entryWidth

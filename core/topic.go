@@ -23,6 +23,7 @@ type Topic struct {
 	folderPath    string
 	partitions    map[int32]Partition
 	numPartitions int32
+	logger        *log.Logger
 	// TODO: load from disk
 	// configFile    *os.File
 
@@ -32,53 +33,58 @@ type Topic struct {
 }
 
 // NewTopic creates topic and corresponding topic folder. It then recursively creates partitions.
-func NewTopic(key string, partitionIndices []int32, folderPath string, rolloverLimit int64) (*Topic, error) {
+func NewTopic(key string, partitionIndices []int32, folderPath string, rolloverLimit int64, logger *log.Logger) (*Topic, error) {
+	topicLogger := deriveLogger(logger, fmt.Sprintf("topic(%s)", key))
 	topicPath := fmt.Sprintf("%s/%s", folderPath, key)
 	if err := os.Mkdir(topicPath, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create topic folder: %w", err)
 	}
-	log.Infof("Created topic %s at %s", key, topicPath)
-
 	partitions := make(map[int32]Partition)
 	for _, i := range partitionIndices {
-		p, err := NewPartition(i, topicPath, rolloverLimit)
+		p, err := NewPartition(i, topicPath, rolloverLimit, topicLogger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create partitions for topic: %w", err)
 		}
 		partitions[i] = p
 	}
 
-	return &Topic{
+	t := &Topic{
 		Key:           key,
 		folderPath:    topicPath,
 		partitions:    partitions,
 		numPartitions: int32(len(partitionIndices)),
-	}, nil
+		logger:        topicLogger,
+	}
+	t.logger.Infof("created at %s", topicPath)
+	return t, nil
 }
 
-func LoadTopic(topic, topicPath string, rolloverLimit int64) (*Topic, error) {
-	partitions, err := LoadPartitions(topicPath, rolloverLimit)
+func LoadTopic(topic, topicPath string, rolloverLimit int64, logger *log.Logger) (*Topic, error) {
+	topicLogger := deriveLogger(logger, fmt.Sprintf("topic(%s)", topic))
+	partitions, err := LoadPartitions(topicPath, rolloverLimit, topicLogger)
 	if err != nil {
 		return nil, err
 	}
 	numPartitions := len(partitions)
 
-	specialTopics := []string{offsetTopic, metadataTopic}
-	if !slices.Contains(specialTopics, topic) {
-		log.Info("Loaded", "topic", topic, "numPartitions", numPartitions)
-	}
-
-	return &Topic{
+	t := &Topic{
 		Key:           topic,
 		folderPath:    topicPath,
 		partitions:    partitions,
 		numPartitions: int32(numPartitions),
 		counter:       atomic.Uint64{},
-	}, nil
+		logger:        topicLogger,
+	}
+
+	specialTopics := []string{offsetTopic, metadataTopic}
+	if !slices.Contains(specialTopics, topic) {
+		t.logger.Info("loaded", "numPartitions", numPartitions)
+	}
+	return t, nil
 }
 
 // LoadTopics scans the directories to restore the topic states
-func LoadTopics(basePath string, rolloverLimit int64) (map[string]*Topic, error) {
+func LoadTopics(basePath string, rolloverLimit int64, logger *log.Logger) (map[string]*Topic, error) {
 	folders, err := os.ReadDir(basePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load topics: %w", err)
@@ -92,9 +98,9 @@ func LoadTopics(basePath string, rolloverLimit int64) (map[string]*Topic, error)
 		}
 		folderPath := fmt.Sprintf("%s/%s", basePath, folder.Name())
 
-		t, err := LoadTopic(folder.Name(), folderPath, rolloverLimit)
+		t, err := LoadTopic(folder.Name(), folderPath, rolloverLimit, logger)
 		if err != nil {
-			log.Warnf("failed to load partition at %s: %s", folder.Name(), err.Error())
+			deriveLogger(logger, fmt.Sprintf("topic(%s)", folder.Name())).Warnf("failed to load: %s", err.Error())
 			continue
 		}
 		topics[t.Key] = t

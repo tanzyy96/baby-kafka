@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -42,7 +43,7 @@ func main() {
 }
 
 func runProducer(id int, cfg *core.Config, topic, key string, numMessages int) {
-	p, err := client.NewProducer(cfg)
+	p, err := client.NewProducer(cfg, log.NewWithOptions(os.Stderr, log.Options{}))
 	if err != nil {
 		log.Fatalf("Failed to create producer %d: %s", id, err)
 	}

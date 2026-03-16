@@ -8,8 +8,13 @@ import (
 
 	"baby-kafka/core"
 
+	"github.com/charmbracelet/log"
 	"github.com/stretchr/testify/require"
 )
+
+func TestLogger() *log.Logger {
+	return log.NewWithOptions(os.Stderr, log.Options{})
+}
 
 // SharedTestConfig returns a test configuration with the specified number of brokers.
 // It also initialises the test directory, which is accessible via the BasePath field.

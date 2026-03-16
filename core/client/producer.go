@@ -27,6 +27,7 @@ type producer struct {
 	cfg        *core.Config
 	brokerConn map[int32]net.Conn
 	writers    map[int32]*bufio.Writer // We use a buffered writer to batch writes and improve performance
+	logger     *log.Logger
 
 	// Metadata is able to store metadata for different topics
 	// If the topic is not found, we will load metadata for that topic
@@ -41,7 +42,7 @@ func WithProducerDialFn(fn func(addr string) (net.Conn, error)) ProducerOption {
 	}
 }
 
-func NewProducer(cfg *core.Config, opts ...ProducerOption) (Producer, error) {
+func NewProducer(cfg *core.Config, logger *log.Logger, opts ...ProducerOption) (Producer, error) {
 	brokerConn := make(map[int32]net.Conn)
 	writers := make(map[int32]*bufio.Writer)
 	metadata := make(map[string]*core.TopicMetadata)
@@ -53,6 +54,7 @@ func NewProducer(cfg *core.Config, opts ...ProducerOption) (Producer, error) {
 		brokerConn: brokerConn,
 		writers:    writers,
 		metadata:   metadata,
+		logger:     logger,
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -138,7 +140,7 @@ func (p *producer) FetchTopicMetadata(brokerID int32, topic string) (*core.Topic
 
 	// set metadata and partition index
 	p.metadata[topic] = mResp.Metadata
-	log.Info("Loaded topic metadata", "topic", topic)
+	p.logger.Info("loaded topic metadata", "topic", topic)
 
 	return mResp.Metadata, nil
 }
@@ -198,7 +200,7 @@ func (p *producer) Send(topic string, key, value []byte) (*core.ProduceResponse,
 		return nil, fmt.Errorf("failed to decode response.Data: %w", err)
 	}
 
-	log.Info("Sent message", "key", string(key), "partition", partition, "value", string(value), "resp", prodResp)
+	p.logger.Info("sent message", "key", string(key), "partition", partition, "value", string(value), "resp", prodResp)
 
 	return &prodResp, nil
 }
@@ -206,7 +208,7 @@ func (p *producer) Send(topic string, key, value []byte) (*core.ProduceResponse,
 func (p *producer) Close() error {
 	for _, conn := range p.brokerConn {
 		if err := conn.Close(); err != nil {
-			log.Warn("Failed to close connection", "err", err)
+			p.logger.Warn("failed to close connection", "err", err)
 		}
 	}
 	return nil

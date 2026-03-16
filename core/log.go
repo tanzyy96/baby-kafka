@@ -36,6 +36,12 @@ func NewLog(baseOffset int64, pathPrefix string) (*Log, error) {
 
 	filePrefix := pathPrefix + "/" + padded
 	filePath := fmt.Sprintf("%s.log", filePrefix)
+
+	// If file exists, use LoadLog
+	if _, err := os.Stat(filePath); err == nil {
+		return LoadLog(filePath)
+	}
+
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create log file: %w", err)
@@ -117,9 +123,43 @@ func (l *Log) Append(msg Message) (offset int64, bytePos int64, err error) {
 	return currOffset, l.size, nil
 }
 
-// Reads a message from the log based on absolute offset. This is performed via the log index.
-// so Read(1003) would translate to Read(3) on the log with baseOffset 1000
-func (l *Log) Read(absoluteOffset int64) (*Message, error) {
+// AppendReplicated inserts message into log with specific offset and updates index
+// We need to support this because replication may not always be msg1, msg2, msg3...
+//
+// Duplicating from compacted logs may return msg1, msg5, msg7...
+// So we need to support that too. It also helps with sanity check to ensure the replication is correct.
+func (l *Log) AppendReplicated(msg MessageWithOffset) (bytePos int64, err error) {
+	serialized, err := msg.Message.Serialize()
+	if err != nil {
+		return 0, fmt.Errorf("failed to append message: %w", err)
+	}
+
+	prefix := int64(len(serialized))
+	if err := binary.Write(l.file, binary.BigEndian, prefix); err != nil {
+		return 0, fmt.Errorf("failed to write message length prefix: %w", err)
+	}
+
+	n, err := l.file.Write(serialized)
+	if err != nil {
+		return 0, fmt.Errorf("failed to write message to log: %w", err)
+	}
+
+	currSize := l.size
+	currOffset := msg.Offset // Use offset from msg instead
+	l.size += int64(n) + 8   // 8 bytes for the length prefix -> 8 * 8 = 64
+	l.nextOffset = msg.Offset + 1
+
+	// Write to index
+	if err := l.index.Append(int32(currOffset), int32(currSize)); err != nil {
+		return 0, fmt.Errorf("failed to write to index: %w", err)
+	}
+
+	return l.size, nil
+}
+
+// ReadAt reads a message from the log based on absolute offset. This is performed via the log index.
+// so ReadAt(1003) would translate to ReadAt(3) on the log with baseOffset 1000
+func (l *Log) ReadAt(absoluteOffset int64) (*Message, error) {
 	relativeOffset := absoluteOffset - l.baseOffset
 	if relativeOffset < 0 {
 		return nil, fmt.Errorf("absoluteOffset cannot be smaller than baseOffset of %d", l.baseOffset)
@@ -129,13 +169,13 @@ func (l *Log) Read(absoluteOffset int64) (*Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read from index: %w", err)
 	}
-	return l.ReadAt(int64(bytePos))
+	return l.readAtByte(int64(bytePos))
 }
 
 /*
-ReadAt reads a message from the log file based on the offset. It should read the length prefix first, then read the message payload.
+readAtByte reads a message from the log file based on the offset. It should read the length prefix first, then read the message payload.
 */
-func (l *Log) ReadAt(bytePos int64) (*Message, error) {
+func (l *Log) readAtByte(bytePos int64) (*Message, error) {
 	// Seek to the offset, read the length prefix, then read the message payload
 	if _, err := l.file.Seek(bytePos, 0); err != nil {
 		return nil, fmt.Errorf("failed to seek to offset: %w", err)

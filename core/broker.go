@@ -1,9 +1,11 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/charmbracelet/log"
 )
@@ -26,6 +28,8 @@ type Broker interface {
 	GetTopicMetadata(topicName string) (*TopicMetadata, error)
 	BroadcastMetadata(topic string) error
 	InsertMetadata(map[string]*TopicMetadata) error
+
+	StartReplication(ctx context.Context) error
 }
 
 type broker struct {
@@ -35,62 +39,47 @@ type broker struct {
 	rolloverLimit     int64
 	replicationFactor int32
 
-	brokerConfigs []BrokerConfig
-	brokerClients map[int32]BrokerClient
+	cfg             *Config
+	brokerConfigs   []BrokerConfig
+	brokerClients   map[int32]BrokerClient
+	newBrokerClient func(addr string) (BrokerClient, error)
 
 	offsetManager   OffsetManager
 	metadataManager MetadataManager
+	logger          *log.Logger
 }
 
-func NewBroker(id int32, cfg *Config) (Broker, error) {
+type BrokerOption func(*broker)
+
+func WithBrokerClientFactory(f func(addr string) (BrokerClient, error)) BrokerOption {
+	return func(b *broker) {
+		b.newBrokerClient = f
+	}
+}
+
+func NewBroker(id int32, cfg *Config, logger *log.Logger, opts ...BrokerOption) (Broker, error) {
+	brokerLogger := deriveLogger(logger, fmt.Sprintf("broker-%d", id))
 	brokerPath := fmt.Sprintf("%s/broker-%d", cfg.BasePath, id)
 	// Try creating the base path for the broker if it doesn't exist
 	if err := os.Mkdir(brokerPath, 0o755); err != nil {
 		if os.IsExist(err) {
-			log.Infof("Broker path already exists, loading existing directory: %s", brokerPath)
-			return LoadBroker(id, cfg)
+			brokerLogger.Infof("path already exists, loading: %s", brokerPath)
+			return LoadBroker(id, cfg, logger, opts...)
 		} else {
 			return nil, fmt.Errorf("failed to init broker: %w", err)
 		}
 	}
-	log.Infof("Created broker directory: %s", brokerPath)
+	brokerLogger.Infof("created directory: %s", brokerPath)
 	topics := make(map[string]*Topic)
-	om, err := NewOffsetManager(brokerPath, cfg.RolloverLimit)
+	om, err := NewOffsetManager(brokerPath, cfg.RolloverLimit, brokerLogger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init broker: %w", err)
 	}
-	mm, err := NewMetadataManager(brokerPath, cfg.RolloverLimit)
+	mm, err := NewMetadataManager(brokerPath, cfg.RolloverLimit, brokerLogger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init broker: %w", err)
 	}
-	return &broker{
-		id:              id,
-		topics:          topics,
-		basePath:        brokerPath,
-		rolloverLimit:   cfg.RolloverLimit,
-		brokerConfigs:   cfg.Brokers,
-		offsetManager:   om,
-		metadataManager: mm,
-		brokerClients:   initBrokerClients(id, cfg.Brokers),
-	}, nil
-}
-
-func LoadBroker(id int32, cfg *Config) (Broker, error) {
-	brokerPath := fmt.Sprintf("%s/broker-%d", cfg.BasePath, id)
-	topics, err := LoadTopics(brokerPath, cfg.RolloverLimit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load broker: %w", err)
-	}
-	om, err := LoadOffsetManager(brokerPath, cfg.RolloverLimit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load broker: %w", err)
-	}
-	mm, err := LoadMetadataManager(brokerPath, cfg.RolloverLimit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load broker: %w", err)
-	}
-
-	return &broker{
+	b := &broker{
 		id:                id,
 		topics:            topics,
 		basePath:          brokerPath,
@@ -98,25 +87,105 @@ func LoadBroker(id int32, cfg *Config) (Broker, error) {
 		brokerConfigs:     cfg.Brokers,
 		offsetManager:     om,
 		metadataManager:   mm,
-		brokerClients:     initBrokerClients(id, cfg.Brokers),
 		replicationFactor: cfg.ReplicationFactor,
-	}, nil
+		brokerClients:     map[int32]BrokerClient{},
+		newBrokerClient:   func(addr string) (BrokerClient, error) { return NewBrokerClient(addr, brokerLogger) },
+		logger:            brokerLogger,
+	}
+	for _, opt := range opts {
+		opt(b)
+	}
+
+	return b, nil
 }
 
-func initBrokerClients(id int32, configs []BrokerConfig) map[int32]BrokerClient {
+func LoadBroker(id int32, cfg *Config, logger *log.Logger, opts ...BrokerOption) (Broker, error) {
+	brokerLogger := deriveLogger(logger, fmt.Sprintf("broker-%d", id))
+	brokerPath := fmt.Sprintf("%s/broker-%d", cfg.BasePath, id)
+	topics, err := LoadTopics(brokerPath, cfg.RolloverLimit, brokerLogger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load broker: %w", err)
+	}
+	om, err := LoadOffsetManager(brokerPath, cfg.RolloverLimit, brokerLogger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load broker: %w", err)
+	}
+	mm, err := LoadMetadataManager(brokerPath, cfg.RolloverLimit, brokerLogger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load broker: %w", err)
+	}
+
+	b := &broker{
+		id:                id,
+		topics:            topics,
+		basePath:          brokerPath,
+		rolloverLimit:     cfg.RolloverLimit,
+		brokerConfigs:     cfg.Brokers,
+		offsetManager:     om,
+		metadataManager:   mm,
+		replicationFactor: cfg.ReplicationFactor,
+		brokerClients:     map[int32]BrokerClient{},
+		newBrokerClient: func(addr string) (BrokerClient, error) {
+			return NewBrokerClient(addr, brokerLogger)
+		},
+		logger: brokerLogger,
+	}
+
+	for _, opt := range opts {
+		opt(b)
+	}
+
+	return b, nil
+}
+
+func (b *broker) initBrokerClients() map[int32]BrokerClient {
 	brokerClients := make(map[int32]BrokerClient)
-	for _, config := range configs {
-		if config.Index == id {
+	for _, config := range b.brokerConfigs {
+		if config.Index == b.id {
 			continue
 		}
-		client, err := NewBrokerClient(config.Addr)
+		client, err := b.newBrokerClient(config.Addr)
 		if err != nil {
-			log.Warnf("Failed to create broker client %d for port %s: %v", config.Index, config.Addr, err)
+			b.logger.Warnf("failed to create broker client %d for port %s: %v", config.Index, config.Addr, err)
 			continue
 		}
 		brokerClients[config.Index] = client
 	}
 	return brokerClients
+}
+
+// StartReplication spins up a goroutine to ping the leader partitions for batched updates to message log for each partition
+func (b *broker) StartReplication(ctx context.Context) error {
+	m := b.metadataManager.GetAll()
+	for topic, meta := range m {
+		for _, pMeta := range meta.PartitionMetadata {
+			if slices.Contains(pMeta.Replicas, b.id) {
+				// Create the topic folder if don't exist
+				topicPath := fmt.Sprintf("%s/%s", b.basePath, topic)
+				if err := os.MkdirAll(topicPath, 0o755); err != nil {
+					return fmt.Errorf("failed to create topic folder for %s: %w", topic, err)
+				}
+
+				p, err := LoadPartition(pMeta.PartitionIndex, topicPath, b.rolloverLimit, b.logger)
+				if err != nil {
+					return fmt.Errorf("failed to get replica partition for %s: %w", topic, err)
+				}
+
+				bc, err := b.newBrokerClient(pMeta.LeaderAddr)
+				if err != nil {
+					return fmt.Errorf("failed to create broker client for %s: %w", pMeta.LeaderAddr, err)
+				}
+
+				// Create a new ReplicaFetcher for each replica partition
+				rf := NewReplicaFetcher(b.cfg, p, bc, topic, b.id, pMeta.Leader, b.logger)
+				if err != nil {
+					return fmt.Errorf("failed to create replica fetcher for %s: %w", topic, err)
+				}
+				go rf.Start(ctx)
+			}
+		}
+	}
+	return nil
 }
 
 // CreateTopic creates the topic metadata and initializes the topic folders.
@@ -134,7 +203,7 @@ func (b *broker) CreateTopic(key string, numPartitions int32) error {
 
 	partitionIndices := b.metadataManager.PartitionsResponsibleFor(b.id, key)
 
-	topic, err := NewTopic(key, partitionIndices, b.basePath, b.rolloverLimit)
+	topic, err := NewTopic(key, partitionIndices, b.basePath, b.rolloverLimit, b.logger)
 	if err != nil {
 		return err
 	}
@@ -144,7 +213,7 @@ func (b *broker) CreateTopic(key string, numPartitions int32) error {
 	}
 
 	b.topics[key] = topic
-	log.Info("Created topic", "key", key, "numPartitions", numPartitions)
+	b.logger.Info("created topic", "key", key, "numPartitions", numPartitions)
 	return nil
 }
 
@@ -210,10 +279,13 @@ func (b *broker) GetTopicMetadata(topicName string) (*TopicMetadata, error) {
 
 // BroadcastMetadata syncs topic metadata across all brokers
 func (b *broker) BroadcastMetadata(topic string) error {
+	if len(b.brokerClients) == 0 {
+		b.brokerClients = b.initBrokerClients()
+	}
 	topicMetadata := b.metadataManager.Get(topic)
 	for _, client := range b.brokerClients {
 		if err := client.Broadcast(topic, topicMetadata); err != nil {
-			log.Warnf("Failed to sync topic metadata with broker client: %v. Should retry soon.", err)
+			b.logger.Warnf("failed to sync topic metadata with broker client: %v. Should retry soon.", err)
 		}
 	}
 
@@ -233,17 +305,17 @@ func (b *broker) InsertMetadata(newMeta map[string]*TopicMetadata) error {
 	b.metadataManager.Update(newMeta)
 
 	for _, topic := range newTopics {
-		log.Debug("New metadata", "metadata", b.metadataManager.Get(topic))
+		b.logger.Debug("new metadata", "metadata", b.metadataManager.Get(topic))
 		partitionIndices := b.metadataManager.PartitionsResponsibleFor(b.id, topic)
-		log.Debugf("Broker is in charge of %v for topic %s", partitionIndices, topic)
-		topic, err := NewTopic(topic, partitionIndices, b.basePath, b.rolloverLimit)
+		b.logger.Debugf("responsible for partitions %v on topic %s", partitionIndices, topic)
+		topic, err := NewTopic(topic, partitionIndices, b.basePath, b.rolloverLimit, b.logger)
 		if err != nil {
 			return err
 		}
 		b.topics[topic.Key] = topic
 	}
 
-	log.Infof("Updated metadata for broker %d: currently has %d topics", b.id, len(b.topics))
+	b.logger.Infof("updated metadata: now has %d topics", len(b.topics))
 
 	return nil
 }

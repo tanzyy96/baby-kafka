@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"baby-kafka/core"
+	testutils "baby-kafka/core/test_utils"
 
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +18,7 @@ func newTestPartition(t *testing.T, maxSize int64) core.Partition {
 	require.NoError(t, err)
 
 	// Create a new partition instance
-	partition, err := core.NewPartition(0, dir, maxSize) // Set maxSize to 1 byte to trigger rollover quickly, else 0 to use default
+	partition, err := core.NewPartition(0, dir, maxSize, testutils.TestLogger()) // Set maxSize to 1 byte to trigger rollover quickly, else 0 to use default
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -131,7 +132,7 @@ func TestLoadPartition(t *testing.T) {
 
 	// Now we load the partition again and verify we can read the messages
 	folderPath := partition.BasePath()[:len(partition.BasePath())-len("/partition-0")]
-	loadedPartition, err := core.LoadPartition(0, folderPath, 1)
+	loadedPartition, err := core.LoadPartition(0, folderPath, 1, testutils.TestLogger())
 	require.NoError(t, err)
 
 	// Writing and reading new messages as well

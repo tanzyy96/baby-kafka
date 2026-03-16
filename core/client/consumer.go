@@ -40,6 +40,7 @@ type consumer struct {
 	dialFn  func(addr string) (net.Conn, error)
 	cfg     *core.Config
 	writers map[int32]*bufio.Writer
+	logger  *log.Logger
 
 	// Map of partition IDs to connections.
 	//
@@ -79,7 +80,7 @@ func WithConsumerDialFn(dialFn func(addr string) (net.Conn, error)) ConsumerOpti
 	}
 }
 
-func NewConsumer(id string, cfg *core.Config, groupID, topic string, partitionIndex []int32, opts ...ConsumerOption) (Consumer, error) {
+func NewConsumer(id string, cfg *core.Config, groupID, topic string, partitionIndex []int32, logger *log.Logger, opts ...ConsumerOption) (Consumer, error) {
 	dialFn := func(addr string) (net.Conn, error) {
 		return net.Dial("tcp", addr)
 	}
@@ -97,6 +98,7 @@ func NewConsumer(id string, cfg *core.Config, groupID, topic string, partitionIn
 		groupID:       groupID,
 		topic:         topic,
 		offsets:       offsets,
+		logger:        logger,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -116,17 +118,17 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 				case <-ctx.Done():
 					return
 				default:
-					log.Debug("Polling partition", "partitionIndex", partitionIndex)
+					c.logger.Debug("polling partition", "partitionIndex", partitionIndex)
 					key, value, atOffset, pollErr := c.Poll(partitionIndex)
 
-					log.Debug("Received message", "partitionIndex", partitionIndex, "offset", atOffset)
+					c.logger.Debug("received message", "partitionIndex", partitionIndex, "offset", atOffset)
 					if pollErr != nil {
 						if errors.Is(pollErr, core.ErrOffsetNotFound) {
-							log.Debug("Offset not found for partition, sleeping", "partitionIndex", partitionIndex)
+							c.logger.Debug("offset not found, sleeping", "partitionIndex", partitionIndex)
 							time.Sleep(time.Duration(c.cfg.Consumer.SleepInterval) * time.Second)
 							continue
 						} else {
-							log.Warn("Failed to poll partition", "partitionIndex", partitionIndex, "err", pollErr)
+							c.logger.Warn("failed to poll partition", "partitionIndex", partitionIndex, "err", pollErr)
 						}
 					}
 
@@ -135,9 +137,10 @@ func (c *consumer) Run(ctx context.Context) <-chan PollResult {
 					case resultChan <- PollResult{PartitionIndex: partitionIndex, Key: key, Value: value, Offset: atOffset, Err: pollErr}:
 						if pollErr == nil {
 							if err := c.CommitOffset(partitionIndex, atOffset+1); err != nil {
-								log.Warn("Failed to commit offset", "partitionIndex", partitionIndex, "offset", atOffset+1, "err", err)
+								c.logger.Warn("failed to commit offset", "partitionIndex", partitionIndex, "offset", atOffset+1, "err", err)
+							} else {
+								c.logger.Info("committed offset", "partitionIndex", partitionIndex, "offset", atOffset+1)
 							}
-							log.Info("Commited offset", "partitionIndex", partitionIndex, "offset", atOffset+1)
 						}
 					case <-ctx.Done():
 						return
@@ -265,7 +268,7 @@ func (c *consumer) fetchTopicMetadata(topic string) (*core.TopicMetadata, error)
 
 	// set metadata and partition index
 	c.metadata = mResp.Metadata
-	log.Info("Loaded topic metadata", "topic", topic)
+	c.logger.Info("loaded topic metadata", "topic", topic)
 
 	return mResp.Metadata, nil
 }
@@ -427,7 +430,7 @@ func (c *consumer) FetchAllOffsets() (map[int32]int64, error) {
 		if err != nil {
 			// No offset found, expecting brand new partition
 			if errors.Is(err, core.ErrOffsetNotFound) {
-				log.Info("No offset found for partition, setting to 0", "partitionIndex", partitionIndex)
+				c.logger.Info("no offset found for partition, setting to 0", "partitionIndex", partitionIndex)
 				offset = 0
 			} else {
 				return nil, fmt.Errorf("failed to fetch offset for partition %d: %w", partitionIndex, err)
@@ -504,12 +507,12 @@ func (c *consumer) BrokerFor(partitionIndex int32) (int32, error) {
 func (c *consumer) Close() error {
 	for _, conn := range c.partitionConn {
 		if err := conn.Close(); err != nil {
-			log.Warn("Failed to close connection", "err", err)
+			c.logger.Warn("failed to close connection", "err", err)
 		}
 	}
 	if c.bootstrapConn != nil {
 		if err := c.bootstrapConn.Close(); err != nil {
-			log.Warn("Failed to close bootstrap connection", "err", err)
+			c.logger.Warn("failed to close bootstrap connection", "err", err)
 		}
 	}
 	return nil

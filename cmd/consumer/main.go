@@ -51,7 +51,7 @@ func main() {
 
 func runConsumer(id int, cfg *core.Config, groupID, topic string, partitionIDs []int32) {
 	consumerID := fmt.Sprintf("%s-%d", groupID, id)
-	c, err := client.NewConsumer(consumerID, cfg, groupID, topic, partitionIDs)
+	c, err := client.NewConsumer(consumerID, cfg, groupID, topic, partitionIDs, log.NewWithOptions(os.Stderr, log.Options{}))
 	if err != nil {
 		log.Fatalf("Failed to create consumer %d: %s", id, err)
 	}

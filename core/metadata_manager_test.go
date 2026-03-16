@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	core "baby-kafka/core"
+	testutils "baby-kafka/core/test_utils"
 
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +16,7 @@ func newMetadataManager(t *testing.T) core.MetadataManager {
 
 	rolloverLimit := int64(1024 * 1024) // 1MB for testing
 
-	tm, err := core.NewMetadataManager(dir, rolloverLimit)
+	tm, err := core.NewMetadataManager(dir, rolloverLimit, testutils.TestLogger())
 	require.NoError(t, err)
 
 	return tm

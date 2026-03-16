@@ -53,9 +53,11 @@ type offsetManager struct {
 	offsets     map[string]map[string]map[int32]int64
 	offsetTopic *Topic
 	mutex       sync.RWMutex
+	logger      *log.Logger
 }
 
-func NewOffsetManager(basePath string, rolloverLimit int64) (OffsetManager, error) {
+func NewOffsetManager(basePath string, rolloverLimit int64, logger *log.Logger) (OffsetManager, error) {
+	omLogger := deriveLogger(logger, "offsets")
 	offsets := make(map[string]map[string]map[int32]int64)
 
 	partitionIndices := []int32{}
@@ -63,27 +65,29 @@ func NewOffsetManager(basePath string, rolloverLimit int64) (OffsetManager, erro
 		partitionIndices = append(partitionIndices, i)
 	}
 
-	t, err := NewTopic(offsetTopic, partitionIndices, basePath, rolloverLimit)
+	t, err := NewTopic(offsetTopic, partitionIndices, basePath, rolloverLimit, omLogger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init offset manager: %w", err)
 	}
 	return &offsetManager{
 		offsets:     offsets,
 		offsetTopic: t,
+		logger:      omLogger,
 	}, nil
 }
 
-func LoadOffsetManager(basePath string, rolloverLimit int64) (OffsetManager, error) {
+func LoadOffsetManager(basePath string, rolloverLimit int64, logger *log.Logger) (OffsetManager, error) {
+	omLogger := deriveLogger(logger, "offsets")
 	offsetPath := fmt.Sprintf("%s/%s", basePath, offsetTopic)
 	if _, err := os.Stat(offsetPath); os.IsNotExist(err) {
-		return NewOffsetManager(basePath, rolloverLimit)
+		return NewOffsetManager(basePath, rolloverLimit, logger)
 	}
 
-	om := &offsetManager{}
-	if err := om.restore(basePath, rolloverLimit); err != nil {
+	om := &offsetManager{logger: omLogger}
+	if err := om.restore(basePath, rolloverLimit, omLogger); err != nil {
 		return nil, fmt.Errorf("failed to load offset manager: %w", err)
 	}
-	log.Info("Loaded offsets")
+	om.logger.Info("loaded offsets")
 	return om, nil
 }
 
@@ -108,7 +112,7 @@ func (om *offsetManager) CommitOffset(groupID string, topicID string, partitionI
 	om.updateOffset(groupID, topicID, partitionID, newOffset)
 
 	if err := om.persistToLog(groupID, topicID, partitionID, newOffset); err != nil {
-		log.Warnf("failed to persist offset to %s", offsetTopic)
+		om.logger.Warnf("failed to persist offset to %s", offsetTopic)
 	}
 }
 
@@ -157,8 +161,8 @@ func (om *offsetManager) persistToLog(groupID string, topicID string, partitionI
 	return nil
 }
 
-func (om *offsetManager) restore(basePath string, rolloverLimit int64) error {
-	t, err := LoadTopic(offsetTopic, fmt.Sprintf("%s/%s", basePath, offsetTopic), rolloverLimit)
+func (om *offsetManager) restore(basePath string, rolloverLimit int64, logger *log.Logger) error {
+	t, err := LoadTopic(offsetTopic, fmt.Sprintf("%s/%s", basePath, offsetTopic), rolloverLimit, logger)
 	if err != nil {
 		return fmt.Errorf("failed to restore offsets from %s: %w", offsetTopic, err)
 	}
@@ -174,7 +178,7 @@ func (om *offsetManager) restore(basePath string, rolloverLimit int64) error {
 			// Go down every message to updateOffset
 			offset := lg.baseOffset
 			for offset < lg.nextOffset {
-				msg, err := lg.Read(offset)
+				msg, err := lg.ReadAt(offset)
 				if err != nil {
 					break // should be done reading this log
 				}
@@ -183,14 +187,14 @@ func (om *offsetManager) restore(basePath string, rolloverLimit int64) error {
 				value := OffsetValue{}
 
 				if err := proto.GobDecode(msg.Key, &key); err != nil {
-					log.Warnf("restore: skipping record at offset %d: failed to decode key: %v", offset, err)
+					om.logger.Warnf("restore: skipping record at offset %d: failed to decode key: %v", offset, err)
 					skipped++
 					offset++
 					continue
 				}
 
 				if err := proto.GobDecode(msg.Value, &value); err != nil {
-					log.Warnf("restore: skipping record at offset %d: failed to decode value: %v", offset, err)
+					om.logger.Warnf("restore: skipping record at offset %d: failed to decode value: %v", offset, err)
 					skipped++
 					offset++
 					continue
@@ -203,6 +207,6 @@ func (om *offsetManager) restore(basePath string, rolloverLimit int64) error {
 		}
 	}
 
-	log.Infof("Restored %d offset(s) from log (%d record(s) skipped)", restored, skipped)
+	om.logger.Infof("restored %d offset(s) from log (%d record(s) skipped)", restored, skipped)
 	return nil
 }

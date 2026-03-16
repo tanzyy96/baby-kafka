@@ -15,18 +15,20 @@ import (
 )
 
 type Admin struct {
-	conn net.Conn
-	w    *bufio.Writer
+	conn   net.Conn
+	w      *bufio.Writer
+	logger *log.Logger
 }
 
-func NewAdmin(addr string) (*Admin, error) {
+func NewAdmin(addr string, logger *log.Logger) (*Admin, error) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 	return &Admin{
-		conn: conn,
-		w:    bufio.NewWriter(conn),
+		conn:   conn,
+		w:      bufio.NewWriter(conn),
+		logger: logger,
 	}, nil
 }
 
@@ -43,7 +45,7 @@ func (a *Admin) CreateTopic(topic string, numPartitions int32) (*proto.Response,
 		return nil, fmt.Errorf("failed to flush create topic request: %w", err)
 	}
 
-	log.Info("Create topic request sent", "topic", topic, "numPartitions", numPartitions)
+	a.logger.Info("create topic request sent", "topic", topic, "numPartitions", numPartitions)
 
 	// Read response
 	var resp proto.Response

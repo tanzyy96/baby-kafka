@@ -51,6 +51,61 @@ func TestAppend_VariousPayloads(t *testing.T) {
 	}
 }
 
+func TestAppendReplicated(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  core.MessageWithOffset
+	}{
+		{"simple message", core.MessageWithOffset{Message: core.NewMessage([]byte("key1"), []byte("value1")), Offset: 0}},
+		{"empty key", core.MessageWithOffset{Message: core.NewMessage([]byte(nil), []byte("value1")), Offset: 0}},
+		{"empty value", core.MessageWithOffset{Message: core.NewMessage([]byte("key1"), []byte(nil)), Offset: 0}},
+		{"both empty", core.MessageWithOffset{Message: core.NewMessage([]byte(nil), []byte(nil)), Offset: 0}},
+		{"large value", core.MessageWithOffset{Message: core.NewMessage([]byte("key1"), make([]byte, 1024*1024)), Offset: 0}}, // 1MB value
+		{"binary data", core.MessageWithOffset{Message: core.NewMessage([]byte{0x00, 0xFF, 0xAA}, []byte{0x01, 0x02, 0x03}), Offset: 0}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log := newTestLog(t)
+
+			// Append the message to the log
+			_, err := log.AppendReplicated(tt.msg)
+			require.NoError(t, err)
+
+			// Read the message back from the log
+			readMsg, err := log.ReadAt(tt.msg.Offset)
+			require.NoError(t, err)
+			require.Equal(t, tt.msg.Message.Key, readMsg.Key)
+			require.Equal(t, tt.msg.Message.Value, readMsg.Value)
+		})
+	}
+}
+
+func TestAppendReplicated_MultipleMessages(t *testing.T) {
+	msgs := []core.MessageWithOffset{
+		{Message: core.NewMessage([]byte("key1"), []byte("value1")), Offset: 0},
+		{Message: core.NewMessage([]byte(nil), []byte("value1")), Offset: 1},
+		{Message: core.NewMessage([]byte("key1"), []byte(nil)), Offset: 2},
+		{Message: core.NewMessage([]byte(nil), []byte(nil)), Offset: 3},
+		{Message: core.NewMessage([]byte("key1"), make([]byte, 1024*1024)), Offset: 4}, // 1MB value
+		{Message: core.NewMessage([]byte{0x00, 0xFF, 0xAA}, []byte{0x01, 0x02, 0x03}), Offset: 5},
+	}
+
+	log := newTestLog(t)
+
+	for _, msg := range msgs {
+		// Append the message to the log
+		_, err := log.AppendReplicated(msg)
+		require.NoError(t, err)
+
+		// Read the message back from the log
+		readMsg, err := log.ReadAt(msg.Offset)
+		require.NoError(t, err)
+		require.Equal(t, msg.Message.Key, readMsg.Key)
+		require.Equal(t, msg.Message.Value, readMsg.Value)
+	}
+}
+
 func TestReadAt_ReturnsOriginalMessage(t *testing.T) {
 	log := newTestLog(t)
 
@@ -81,15 +136,11 @@ func TestReadAt_MultipleMessages(t *testing.T) {
 	}
 
 	// Read each message back using the correct bytePos
-	var bytePos int64
-	for _, msg := range messages {
-		readMsg, err := log.ReadAt(bytePos)
+	for i, msg := range messages {
+		readMsg, err := log.ReadAt(int64(i))
 		require.NoError(t, err)
 		require.Equal(t, msg.Key, readMsg.Key)
 		require.Equal(t, msg.Value, readMsg.Value)
-
-		// Calculate the next offset (current offset + length prefix + message length)
-		bytePos += readMsg.SerializedLength()
 	}
 }
 
